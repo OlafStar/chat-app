@@ -1,0 +1,56 @@
+services:
+  dynamodb:
+    image: amazon/dynamodb-local:latest
+    command: -jar DynamoDBLocal.jar -sharedDb -dbPath /home/dynamodblocal/data
+    ports:
+      - "8000:8000"
+    volumes:
+      - dynamodb-data:/home/dynamodblocal/data
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --save "" --appendonly no
+    ports:
+      - "6379:6379"
+
+  client-server:
+    build:
+      context: ./backend
+      dockerfile: cmd/client-server/Dockerfile
+    depends_on:
+      - dynamodb
+      - redis
+    environment:
+      AWS_REGION: eu-central-1
+      AWS_ID: local
+      AWS_SECRET: local
+      DYNAMODB_ENDPOINT: http://dynamodb:8000
+      USER_SECRET: change-me-user-secret
+      AUTH_REDIS_URL: redis:6379
+      AUTH_REDIS_PASS: ""
+      CHAT_REDIS_URL: redis:6379
+      CHAT_REDIS_PASS: ""
+      WEB_URL: http://localhost:3000
+    ports:
+      - "8081:81"
+
+  proxy-server:
+    build:
+      context: ./backend
+      dockerfile: cmd/proxy-server/Dockerfile
+    depends_on:
+      - client-server
+    ports:
+      - "8080:80"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    depends_on:
+      - client-server
+    ports:
+      - "3000:3000"
+
+volumes:
+  dynamodb-data:
