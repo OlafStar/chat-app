@@ -25,6 +25,9 @@ help:
 
 up:
 	$(COMPOSE) -p $(PROJECT) up -d $(SERVICES)
+	if [ -z "$(SERVICES)" ] || echo "$(SERVICES)" | grep -Eq '(^|[[:space:]])dynamodb([[:space:]]|$$)'; then \
+		COMPOSE_PROJECT_NAME=$(PROJECT) ./scripts/fix-dynamodb-permissions.sh; \
+	fi
 
 down:
 	$(COMPOSE) -p $(PROJECT) down
