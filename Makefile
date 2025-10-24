@@ -6,8 +6,11 @@ BACKEND_SERVICES := client-server proxy-server
 FRONTEND_SERVICES := frontend
 DATA_SERVICES := dynamodb redis
 
+TEST_ARGS ?=
+
 .PHONY: help up down stop restart build rebuild logs ps clean \
-	backend backend-rebuild frontend frontend-rebuild data data-rebuild
+	backend backend-rebuild frontend frontend-rebuild data data-rebuild \
+	test test-rebuild test-ci
 
 help:
 	@echo "Chat App make targets:"
@@ -17,11 +20,15 @@ help:
 	@echo "  make build [SERVICES=...]           - Build images"
 	@echo "  make rebuild [SERVICES=...]         - Force rebuild without cache"
 	@echo "  make logs [SERVICES=...]            - Follow service logs"
+	@echo "  make ps                             - List containers"
 	@echo "  make clean                          - Full teardown with volumes"
 	@echo "  make backend                        - Restart API + proxy services"
 	@echo "  make backend-rebuild                - Force rebuild API + proxy"
 	@echo "  make frontend / frontend-rebuild    - Manage frontend service"
 	@echo "  make data / data-rebuild            - Manage DynamoDB + Redis"
+	@echo "  make test [TEST_ARGS='...']         - Run Go tests in the tests container"
+	@echo "  make test-rebuild                   - Rebuild tests image then run tests"
+	@echo "  make test-ci [TEST_ARGS='...']      - Start deps then run tests (CI style)"
 
 up:
 	$(COMPOSE) -p $(PROJECT) up -d $(SERVICES)
@@ -73,3 +80,16 @@ data:
 data-rebuild:
 	$(MAKE) SERVICES="$(DATA_SERVICES)" rebuild
 	$(MAKE) SERVICES="$(DATA_SERVICES)" up
+
+test: data
+	$(COMPOSE) -p $(PROJECT) run --rm \
+		-e TEST_ARGS="$(TEST_ARGS)" \
+		tests
+
+test-rebuild:
+	$(COMPOSE) -p $(PROJECT) build tests
+	$(MAKE) test
+
+test-ci:
+	$(COMPOSE) -p $(PROJECT) up -d dynamodb redis
+	$(COMPOSE) -p $(PROJECT) run --rm -e TEST_ARGS="$(TEST_ARGS)" tests

@@ -104,6 +104,32 @@ users_table=$(cat <<'JSON'
 JSON
 )
 
+tenant_invites_table=$(cat <<'JSON'
+{
+  "TableName": "TenantInvites",
+  "AttributeDefinitions": [
+    {"AttributeName": "token", "AttributeType": "S"},
+    {"AttributeName": "tenantEmail", "AttributeType": "S"},
+    {"AttributeName": "createdAt", "AttributeType": "S"}
+  ],
+  "KeySchema": [
+    {"AttributeName": "token", "KeyType": "HASH"}
+  ],
+  "BillingMode": "PAY_PER_REQUEST",
+  "GlobalSecondaryIndexes": [
+    {
+      "IndexName": "byTenantEmail",
+      "KeySchema": [
+        {"AttributeName": "tenantEmail", "KeyType": "HASH"},
+        {"AttributeName": "createdAt", "KeyType": "RANGE"}
+      ],
+      "Projection": {"ProjectionType": "ALL"}
+    }
+  ]
+}
+JSON
+)
+
 conversations_table=$(cat <<'JSON'
 {
   "TableName": "Conversations",
@@ -265,6 +291,7 @@ JSON
 
 create_table "Tenants" "$tenants_table"
 create_table "Users" "$users_table"
+create_table "TenantInvites" "$tenant_invites_table"
 create_table "Conversations" "$conversations_table"
 create_table "Messages" "$messages_table"
 create_table "Visitors" "$visitors_table"

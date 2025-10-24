@@ -6,12 +6,50 @@ services:
       - "8000:8000"
     volumes:
       - dynamodb-data:/home/dynamodblocal/data
+    healthcheck:
+      test: ["CMD", "bash", "-lc", "exec 3<>/dev/tcp/127.0.0.1/8000 && echo -e 'GET / HTTP/1.0\r\n' >&3 && cat <&3 | grep -q HTTP"]
+      interval: 2s
+      timeout: 1s
+      retries: 30
 
   redis:
     image: redis:7-alpine
     command: redis-server --save "" --appendonly no
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 1s
+      retries: 30
+
+  tests:
+    image: golang:1.24-bookworm
+    working_dir: /workspace
+    depends_on:
+      dynamodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - .:/workspace:cached
+      - go-mod-cache:/go/pkg/mod
+      - go-build-cache:/root/.cache/go-build
+    environment:
+      # Same values your other services use, but pointing to compose hostnames
+      AWS_REGION: eu-central-1
+      AWS_ID: local
+      AWS_SECRET: local
+      USER_SECRET: change-me-user-secret
+      AUTH_REDIS_URL: redis://redis:6379/0
+      AUTH_REDIS_PASS: ""
+      CHAT_REDIS_URL: redis://redis:6379/1
+      CHAT_REDIS_PASS: ""
+      DYNAMODB_ENDPOINT: http://dynamodb:8000
+      WEB_URL: http://localhost:3000
+      # Allow passing package/flags at runtime:
+      TEST_ARGS: ""
+    command: ["/bin/bash","-c","chmod +x scripts/run_go_tests.sh && ./scripts/run_go_tests.sh ${TEST_ARGS:-./...}"]
 
   client-server:
     build:
@@ -54,3 +92,5 @@ services:
 
 volumes:
   dynamodb-data:
+  go-mod-cache:
+  go-build-cache:
