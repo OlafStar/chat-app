@@ -8,13 +8,14 @@ type TokenResponse struct {
 }
 
 type RegisterUser struct {
-	Email string `json:"email"`
+	Email    string `json:"email"`
 	Password string `json:"password"`
 }
 
 type User struct {
-	Id string `json:"id"`
-	Email string `json:"email"`
+	Id           string `json:"id"`
+	TenantID     string `json:"tenantId"`
+	Email        string `json:"email"`
 	PasswordHash string `json:"password"`
 }
 

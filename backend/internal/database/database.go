@@ -51,7 +51,7 @@ func NewDynamoDBClient() (*DynamoDBClient, error) {
 }
 
 type Database struct {
-	Client   *DynamoDBClient
+	Client *DynamoDBClient
 }
 
 func NewDatabase() (*Database, error) {
@@ -61,6 +61,6 @@ func NewDatabase() (*Database, error) {
 	}
 
 	return &Database{
-		Client:   dbClient,
+		Client: dbClient,
 	}, nil
 }

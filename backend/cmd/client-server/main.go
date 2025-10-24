@@ -22,6 +22,8 @@ func main() {
 		db,
 		nil,
 		router.UtilsRoutes("/api/client/v1"),
+		router.AuthRoutes("/api/client/v1"),
+		router.TenantRoutes("/api/client/v1"),
 	)
 
 	server.Run()

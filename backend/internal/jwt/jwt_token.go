@@ -39,9 +39,10 @@ func CreateToken(user User, role Role, validUntil int64) (string, error) {
 	}
 
 	claims := jwt.MapClaims{
-		"id":    user.Id,
-		"email": user.Email,
-		"exp":   validUntil,
+		"id":       user.Id,
+		"email":    user.Email,
+		"tenantId": user.TenantID,
+		"exp":      validUntil,
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
@@ -63,8 +64,9 @@ func CreateTokenWithRefresh(user User, role Role, validUntil int64) (TokenRespon
 	refreshToken := appendRoleChar(refreshTokenRaw, role)
 
 	userData := map[string]string{
-		"id":    user.Id,
-		"email": user.Email,
+		"id":       user.Id,
+		"email":    user.Email,
+		"tenantId": user.TenantID,
 	}
 	userDataJSON, _ := json.Marshal(userData)
 
@@ -139,8 +141,9 @@ func RefreshToken(refreshToken string, role Role) (string, error) {
 	}
 
 	user := User{
-		Id:    userData["id"],
-		Email: userData["email"],
+		Id:       userData["id"],
+		Email:    userData["email"],
+		TenantID: userData["tenantId"],
 	}
 
 	err = cleanupExpiredTokens(user.Email, refreshTokenRaw)
