@@ -148,6 +148,25 @@ func (m *memoryRepository) ListConversations(ctx context.Context, tenantID strin
 	return items, nil
 }
 
+func (m *memoryRepository) CountConversationsStartedBetween(ctx context.Context, tenantID string, start, end time.Time) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	count := 0
+	for _, c := range m.conversations {
+		if c.TenantID != tenantID {
+			continue
+		}
+		ts := parseTime(c.CreatedAt)
+		if ts.IsZero() {
+			continue
+		}
+		if (ts.Equal(start) || ts.After(start)) && ts.Before(end) {
+			count++
+		}
+	}
+	return count, nil
+}
+
 func (m *memoryRepository) CreateMessage(ctx context.Context, message model.MessageItem) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -407,5 +426,72 @@ func TestListVisitorMessagesRejectsMismatchedToken(t *testing.T) {
 	}
 	if svcErr.Code != ErrorCodeForbidden {
 		t.Fatalf("expected forbidden, got %s", svcErr.Code)
+	}
+}
+
+func TestGetConversationUsageCountsWithinPeriod(t *testing.T) {
+	repo := newMemoryRepository()
+	now := time.Date(2024, 3, 15, 0, 0, 0, 0, time.UTC)
+	svc := NewWithRepository(repo, func() time.Time { return now })
+	useTestSecret(t)
+
+	tenantID := "tenant-99"
+	userID := "user-99"
+	repo.tenants[tenantID] = model.TenantItem{TenantID: tenantID}
+	repo.users[model.TenantScopedPK(tenantID, userID)] = model.UserItem{
+		PK:       model.TenantScopedPK(tenantID, userID),
+		TenantID: tenantID,
+		UserID:   userID,
+	}
+
+	addConversation := func(id string, created time.Time) {
+		repo.conversations[model.ConversationPK(tenantID, id)] = model.ConversationItem{
+			PK:             model.ConversationPK(tenantID, id),
+			ConversationID: id,
+			TenantID:       tenantID,
+			VisitorID:      "visitor-" + id,
+			Status:         model.ConversationStatusOpen,
+			CreatedAt:      created.Format(time.RFC3339),
+			UpdatedAt:      created.Format(time.RFC3339),
+			LastMessageAt:  created.Format(time.RFC3339),
+		}
+	}
+
+	addConversation("in-range-1", time.Date(2024, 3, 1, 0, 0, 0, 0, time.UTC))
+	addConversation("in-range-2", time.Date(2024, 3, 30, 10, 0, 0, 0, time.UTC))
+	addConversation("out-of-range", time.Date(2024, 2, 28, 23, 59, 0, 0, time.UTC))
+
+	start := time.Date(2024, 3, 1, 0, 0, 0, 0, time.UTC)
+	end := start.AddDate(0, 1, 0)
+
+	result, err := svc.GetConversationUsage(context.Background(), Identity{
+		UserID:   userID,
+		TenantID: tenantID,
+	}, start, end)
+	if err != nil {
+		t.Fatalf("GetConversationUsage returned error: %v", err)
+	}
+	if result.StartedCount != 2 {
+		t.Fatalf("expected 2 conversations, got %d", result.StartedCount)
+	}
+	if !result.PeriodStart.Equal(start) || !result.PeriodEnd.Equal(end) {
+		t.Fatalf("unexpected period %+v", result)
+	}
+}
+
+func TestGetConversationUsageRequiresValidIdentity(t *testing.T) {
+	repo := newMemoryRepository()
+	svc := NewWithRepository(repo, time.Now)
+
+	_, err := svc.GetConversationUsage(context.Background(), Identity{}, time.Now(), time.Now().Add(time.Hour))
+	if err == nil {
+		t.Fatal("expected error for missing identity")
+	}
+	svcErr, ok := err.(*Error)
+	if !ok {
+		t.Fatalf("expected *Error, got %T", err)
+	}
+	if svcErr.Code != ErrorCodeUnauthorized {
+		t.Fatalf("expected unauthorized, got %s", svcErr.Code)
 	}
 }

@@ -33,6 +33,7 @@ func ConversationTenantRoutes(prefix string) api.RouteRegistrar {
 		convEndpoints := endpoints.NewConversationEndpointsWithPaths(service, s.Handler(), paths)
 
 		mux.HandleFunc(prefix+"/conversations", s.MakeHTTPHandleFunc(convEndpoints.Conversations, middleware.ValidateUserJWT))
+		mux.HandleFunc(prefix+"/conversations/usage", s.MakeHTTPHandleFunc(convEndpoints.ConversationUsage, middleware.ValidateUserJWT))
 		mux.HandleFunc(prefix+"/conversations/", s.MakeHTTPHandleFunc(convEndpoints.ConversationMessages, middleware.ValidateUserJWT))
 	}
 }

@@ -18,6 +18,7 @@ type ConversationEndpoints interface {
 	PublicConversationMessages(http.ResponseWriter, *http.Request) error
 	Conversations(http.ResponseWriter, *http.Request) error
 	ConversationMessages(http.ResponseWriter, *http.Request) error
+	ConversationUsage(http.ResponseWriter, *http.Request) error
 	Websocket(http.ResponseWriter, *http.Request) error
 	NotificationsWebsocket(http.ResponseWriter, *http.Request) error
 }
@@ -87,6 +88,12 @@ func (h *conversationEndpoints) ConversationMessages(w http.ResponseWriter, r *h
 	return MethodHandler(w, r, map[string]func(http.ResponseWriter, *http.Request) error{
 		http.MethodGet:  h.handleListMessages,
 		http.MethodPost: h.handlePostAgentMessage,
+	})
+}
+
+func (h *conversationEndpoints) ConversationUsage(w http.ResponseWriter, r *http.Request) error {
+	return MethodHandler(w, r, map[string]func(http.ResponseWriter, *http.Request) error{
+		http.MethodGet: h.handleConversationUsage,
 	})
 }
 
@@ -377,6 +384,36 @@ func (h *conversationEndpoints) handleListMessages(w http.ResponseWriter, r *htt
 	return api.WriteJSON(w, http.StatusOK, resp)
 }
 
+func (h *conversationEndpoints) handleConversationUsage(w http.ResponseWriter, r *http.Request) error {
+	identity, err := h.service.IdentityFromAuthorizationHeader(r.Header.Get("Authorization"))
+	if err != nil {
+		return h.serviceError(err)
+	}
+
+	start, end, monthLabel, err := resolveUsagePeriod(r.URL.Query().Get("month"))
+	if err != nil {
+		return &HTTPError{
+			StatusCode: http.StatusBadRequest,
+			Message:    "Invalid month parameter",
+			ErrorLog:   err,
+		}
+	}
+
+	result, err := h.service.GetConversationUsage(r.Context(), identity, start, end)
+	if err != nil {
+		return h.serviceError(err)
+	}
+
+	resp := dto.ConversationUsageResponse{
+		TenantID:             result.TenantID,
+		Month:                monthLabel,
+		PeriodStart:          result.PeriodStart.Format(time.RFC3339),
+		PeriodEnd:            result.PeriodEnd.Format(time.RFC3339),
+		ConversationsStarted: result.StartedCount,
+	}
+	return api.WriteJSON(w, http.StatusOK, resp)
+}
+
 func (h *conversationEndpoints) handlePostAgentMessage(w http.ResponseWriter, r *http.Request) error {
 	conversationID, err := h.extractTenantConversationPath(r.URL.Path)
 	if err != nil {
@@ -405,6 +442,25 @@ func (h *conversationEndpoints) handlePostAgentMessage(w http.ResponseWriter, r 
 	h.broadcastEvent("message.created", result.Conversation, result.Message)
 
 	return api.WriteJSON(w, http.StatusCreated, toMessageResponse(result.Message))
+}
+
+func resolveUsagePeriod(param string) (time.Time, time.Time, string, error) {
+	month := strings.TrimSpace(param)
+	var start time.Time
+	if month == "" {
+		now := time.Now().UTC()
+		start = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+		month = start.Format("2006-01")
+	} else {
+		parsed, err := time.Parse("2006-01", month)
+		if err != nil {
+			return time.Time{}, time.Time{}, "", fmt.Errorf("invalid month value: %w", err)
+		}
+		start = time.Date(parsed.Year(), parsed.Month(), 1, 0, 0, 0, 0, time.UTC)
+		month = start.Format("2006-01")
+	}
+	end := start.AddDate(0, 1, 0)
+	return start, end, month, nil
 }
 
 func (h *conversationEndpoints) extractPublicMessagePath(path string) (string, error) {

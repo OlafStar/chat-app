@@ -27,6 +27,7 @@ type Repository interface {
 	UpdateConversationVisitorEmail(ctx context.Context, tenantID, conversationID, visitorEmail, updatedAt string) error
 	GetConversation(ctx context.Context, tenantID, conversationID string) (model.ConversationItem, error)
 	ListConversations(ctx context.Context, tenantID string, limit int) ([]model.ConversationItem, error)
+	CountConversationsStartedBetween(ctx context.Context, tenantID string, start, end time.Time) (int, error)
 	CreateMessage(ctx context.Context, message model.MessageItem) error
 	ListMessages(ctx context.Context, tenantID, conversationID string, limit int) ([]model.MessageItem, error)
 }
@@ -273,6 +274,42 @@ func (r *DynamoRepository) ListConversations(ctx context.Context, tenantID strin
 	}
 
 	return conversations, nil
+}
+
+func (r *DynamoRepository) CountConversationsStartedBetween(ctx context.Context, tenantID string, start, end time.Time) (int, error) {
+	if tenantID == "" {
+		return 0, errors.New("tenantID is required")
+	}
+
+	items, err := r.db.Client.QueryAll(
+		ctx,
+		model.ConversationsTable,
+		aws.String("byTenant"),
+		"tenantId = :tenantId",
+		map[string]types.AttributeValue{
+			":tenantId": &types.AttributeValueMemberS{Value: tenantID},
+		},
+	)
+	if err != nil {
+		return 0, err
+	}
+
+	count := 0
+	for _, item := range items {
+		var conversation model.ConversationItem
+		if err := attributevalue.UnmarshalMap(item, &conversation); err != nil {
+			return 0, err
+		}
+		created := parseTime(conversation.CreatedAt)
+		if created.IsZero() {
+			continue
+		}
+		if (created.Equal(start) || created.After(start)) && created.Before(end) {
+			count++
+		}
+	}
+
+	return count, nil
 }
 
 func (r *DynamoRepository) CreateMessage(ctx context.Context, message model.MessageItem) error {

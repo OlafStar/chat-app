@@ -78,3 +78,11 @@ type ListConversationsResponse struct {
 type ListMessagesResponse struct {
 	Messages []MessageResponse `json:"messages"`
 }
+
+type ConversationUsageResponse struct {
+	TenantID             string `json:"tenantId"`
+	Month                string `json:"month"`
+	PeriodStart          string `json:"periodStart"`
+	PeriodEnd            string `json:"periodEnd"`
+	ConversationsStarted int    `json:"conversationsStarted"`
+}

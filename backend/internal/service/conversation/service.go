@@ -94,6 +94,13 @@ type ListMessagesResult struct {
 	Messages     []model.MessageItem
 }
 
+type ConversationUsageResult struct {
+	TenantID     string
+	PeriodStart  time.Time
+	PeriodEnd    time.Time
+	StartedCount int
+}
+
 type VisitorAccess struct {
 	TenantID       string
 	ConversationID string
@@ -520,6 +527,39 @@ func (s *Service) ListConversations(ctx context.Context, identity Identity, limi
 	}
 
 	return ListConversationsResult{Conversations: conversations}, nil
+}
+
+func (s *Service) GetConversationUsage(ctx context.Context, identity Identity, start, end time.Time) (ConversationUsageResult, error) {
+	if identity.UserID == "" || identity.TenantID == "" {
+		return ConversationUsageResult{}, newError(ErrorCodeUnauthorized, "invalid user identity", nil)
+	}
+	if start.IsZero() || end.IsZero() {
+		return ConversationUsageResult{}, newError(ErrorCodeValidation, "period start and end are required", nil)
+	}
+	start = start.UTC()
+	end = end.UTC()
+	if !start.Before(end) {
+		return ConversationUsageResult{}, newError(ErrorCodeValidation, "period start must be before period end", nil)
+	}
+
+	if _, err := s.repo.GetUser(ctx, identity.TenantID, identity.UserID); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return ConversationUsageResult{}, newError(ErrorCodeUnauthorized, "user not found", err)
+		}
+		return ConversationUsageResult{}, newError(ErrorCodeInternal, "failed to verify user", err)
+	}
+
+	count, err := s.repo.CountConversationsStartedBetween(ctx, identity.TenantID, start, end)
+	if err != nil {
+		return ConversationUsageResult{}, newError(ErrorCodeInternal, "failed to load usage", err)
+	}
+
+	return ConversationUsageResult{
+		TenantID:     identity.TenantID,
+		PeriodStart:  start,
+		PeriodEnd:    end,
+		StartedCount: count,
+	}, nil
 }
 
 func (s *Service) ListMessages(ctx context.Context, identity Identity, conversationID string, limit int) (ListMessagesResult, error) {

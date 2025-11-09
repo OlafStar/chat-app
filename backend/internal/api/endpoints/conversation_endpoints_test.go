@@ -157,6 +157,25 @@ func (m *memoryRepository) ListConversations(ctx context.Context, tenantID strin
 	return items, nil
 }
 
+func (m *memoryRepository) CountConversationsStartedBetween(ctx context.Context, tenantID string, start, end time.Time) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	count := 0
+	for _, conv := range m.conversations {
+		if conv.TenantID != tenantID {
+			continue
+		}
+		createdAt, err := time.Parse(time.RFC3339, conv.CreatedAt)
+		if err != nil {
+			continue
+		}
+		if (createdAt.Equal(start) || createdAt.After(start)) && createdAt.Before(end) {
+			count++
+		}
+	}
+	return count, nil
+}
+
 func (m *memoryRepository) CreateMessage(ctx context.Context, message model.MessageItem) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -211,6 +230,7 @@ func setupConversationTestHandler(t *testing.T) (http.Handler, *conversationserv
 	mux.HandleFunc("/api/public/conversations", server.MakeHTTPHandleFunc(endpoints.PublicConversations))
 	mux.HandleFunc("/api/public/conversations/", server.MakeHTTPHandleFunc(endpoints.PublicConversationMessages))
 	mux.HandleFunc("/api/conversations", server.MakeHTTPHandleFunc(endpoints.Conversations, middleware.ValidateUserJWT))
+	mux.HandleFunc("/api/conversations/usage", server.MakeHTTPHandleFunc(endpoints.ConversationUsage, middleware.ValidateUserJWT))
 	mux.HandleFunc("/api/conversations/", server.MakeHTTPHandleFunc(endpoints.ConversationMessages, middleware.ValidateUserJWT))
 	mux.HandleFunc("/api/ws/conversations/", server.MakeHTTPHandleFunc(endpoints.Websocket))
 
@@ -419,6 +439,66 @@ func TestAssignVisitorEmailRequiresValidEmail(t *testing.T) {
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected status 400, got %d", rec.Code)
+	}
+}
+
+func TestConversationUsageEndpoint(t *testing.T) {
+	handler, _, repo := setupConversationTestHandler(t)
+	tenantID := "tenant-usage"
+	userID := "user-usage"
+	repo.tenants[tenantID] = model.TenantItem{TenantID: tenantID}
+	repo.users[model.TenantScopedPK(tenantID, userID)] = model.UserItem{
+		PK:       model.TenantScopedPK(tenantID, userID),
+		TenantID: tenantID,
+		UserID:   userID,
+		Email:    "user@example.com",
+	}
+
+	addConversation := func(id string, created time.Time) {
+		repo.conversations[model.ConversationPK(tenantID, id)] = model.ConversationItem{
+			PK:             model.ConversationPK(tenantID, id),
+			ConversationID: id,
+			TenantID:       tenantID,
+			VisitorID:      "visitor-" + id,
+			Status:         model.ConversationStatusOpen,
+			CreatedAt:      created.Format(time.RFC3339),
+			UpdatedAt:      created.Format(time.RFC3339),
+			LastMessageAt:  created.Format(time.RFC3339),
+		}
+	}
+
+	addConversation("march-1", time.Date(2024, 3, 5, 12, 0, 0, 0, time.UTC))
+	addConversation("march-2", time.Date(2024, 3, 20, 9, 0, 0, 0, time.UTC))
+	addConversation("april", time.Date(2024, 4, 1, 0, 0, 0, 0, time.UTC))
+
+	token, err := internaljwt.CreateToken(
+		internaljwt.User{Id: userID, TenantID: tenantID, Email: "user@example.com"},
+		internaljwt.RoleUser,
+		time.Now().Add(time.Hour).Unix(),
+	)
+	if err != nil {
+		t.Fatalf("create token: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/conversations/usage?month=2024-03", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+
+	var resp dto.ConversationUsageResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.ConversationsStarted != 2 {
+		t.Fatalf("expected 2 conversations, got %d", resp.ConversationsStarted)
+	}
+	if resp.Month != "2024-03" {
+		t.Fatalf("expected month 2024-03, got %s", resp.Month)
 	}
 }
 
