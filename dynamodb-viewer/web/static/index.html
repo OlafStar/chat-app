@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DynamoDB Viewer</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header>
+      <div>
+        <h1>DynamoDB Viewer</h1>
+        <p>Auto-discovers tables and lets you inspect live data without config changes.</p>
+      </div>
+      <div class="env-pill" id="env-pill"></div>
+    </header>
+
+    <div class="layout">
+      <aside>
+        <div class="aside-header">
+          <h2>Tables</h2>
+          <button id="refresh-tables" title="Reload table list">↻</button>
+        </div>
+        <div id="table-list" class="table-list"></div>
+      </aside>
+
+      <main>
+        <section class="panel" id="table-empty">
+          <p>Select a table to get started.</p>
+        </section>
+
+        <section class="panel hidden" id="table-details">
+          <div class="panel-header">
+            <div>
+              <h2 id="table-name"></h2>
+              <p id="table-meta"></p>
+            </div>
+            <div class="controls">
+              <label>
+                Page size
+                <input type="number" id="limit-input" min="1" max="500" value="25" />
+              </label>
+              <button id="reload-items">Reload</button>
+              <button id="next-page" disabled>Next page ➜</button>
+            </div>
+          </div>
+
+          <div class="meta-grid" id="meta-grid"></div>
+
+          <details class="meta-details">
+            <summary>Raw table definition</summary>
+            <pre id="raw-table"></pre>
+          </details>
+
+          <div class="data-grid">
+            <table>
+              <thead id="items-head"></thead>
+              <tbody id="items-body"></tbody>
+            </table>
+            <div class="table-footer" id="table-footer"></div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <template id="table-row-template">
+      <div class="table-row"></div>
+    </template>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

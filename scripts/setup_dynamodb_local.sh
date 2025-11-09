@@ -49,22 +49,12 @@ tenants_table=$(cat <<'JSON'
 {
   "TableName": "Tenants",
   "AttributeDefinitions": [
-    {"AttributeName": "tenantId", "AttributeType": "S"},
-    {"AttributeName": "plan", "AttributeType": "S"}
+    {"AttributeName": "tenantId", "AttributeType": "S"}
   ],
   "KeySchema": [
     {"AttributeName": "tenantId", "KeyType": "HASH"}
   ],
-  "BillingMode": "PAY_PER_REQUEST",
-  "GlobalSecondaryIndexes": [
-    {
-      "IndexName": "byPlan",
-      "KeySchema": [
-        {"AttributeName": "plan", "KeyType": "HASH"}
-      ],
-      "Projection": {"ProjectionType": "ALL"}
-    }
-  ]
+  "BillingMode": "PAY_PER_REQUEST"
 }
 JSON
 )
@@ -135,7 +125,7 @@ conversations_table=$(cat <<'JSON'
   "TableName": "Conversations",
   "AttributeDefinitions": [
     {"AttributeName": "pk", "AttributeType": "S"},
-    {"AttributeName": "tenantStatus", "AttributeType": "S"},
+    {"AttributeName": "tenantId", "AttributeType": "S"},
     {"AttributeName": "tenantVisitor", "AttributeType": "S"},
     {"AttributeName": "lastMessageAt", "AttributeType": "S"}
   ],
@@ -145,9 +135,9 @@ conversations_table=$(cat <<'JSON'
   "BillingMode": "PAY_PER_REQUEST",
   "GlobalSecondaryIndexes": [
     {
-      "IndexName": "byTenantStatus",
+      "IndexName": "byTenant",
       "KeySchema": [
-        {"AttributeName": "tenantStatus", "KeyType": "HASH"},
+        {"AttributeName": "tenantId", "KeyType": "HASH"},
         {"AttributeName": "lastMessageAt", "KeyType": "RANGE"}
       ],
       "Projection": {"ProjectionType": "ALL"}
@@ -169,22 +159,20 @@ messages_table=$(cat <<'JSON'
 {
   "TableName": "Messages",
   "AttributeDefinitions": [
+    {"AttributeName": "pk", "AttributeType": "S"},
     {"AttributeName": "conversationId", "AttributeType": "S"},
-    {"AttributeName": "sortKey", "AttributeType": "S"},
-    {"AttributeName": "tenantId", "AttributeType": "S"},
-    {"AttributeName": "ts", "AttributeType": "S"}
+    {"AttributeName": "createdAt", "AttributeType": "S"}
   ],
   "KeySchema": [
-    {"AttributeName": "conversationId", "KeyType": "HASH"},
-    {"AttributeName": "sortKey", "KeyType": "RANGE"}
+    {"AttributeName": "pk", "KeyType": "HASH"}
   ],
   "BillingMode": "PAY_PER_REQUEST",
   "GlobalSecondaryIndexes": [
     {
-      "IndexName": "byTenantRecent",
+      "IndexName": "byConversation",
       "KeySchema": [
-        {"AttributeName": "tenantId", "KeyType": "HASH"},
-        {"AttributeName": "ts", "KeyType": "RANGE"}
+        {"AttributeName": "conversationId", "KeyType": "HASH"},
+        {"AttributeName": "createdAt", "KeyType": "RANGE"}
       ],
       "Projection": {"ProjectionType": "ALL"}
     }
@@ -197,30 +185,6 @@ visitors_table=$(cat <<'JSON'
 {
   "TableName": "Visitors",
   "AttributeDefinitions": [
-    {"AttributeName": "pk", "AttributeType": "S"},
-    {"AttributeName": "tenantExternalId", "AttributeType": "S"}
-  ],
-  "KeySchema": [
-    {"AttributeName": "pk", "KeyType": "HASH"}
-  ],
-  "BillingMode": "PAY_PER_REQUEST",
-  "GlobalSecondaryIndexes": [
-    {
-      "IndexName": "byExternalId",
-      "KeySchema": [
-        {"AttributeName": "tenantExternalId", "KeyType": "HASH"}
-      ],
-      "Projection": {"ProjectionType": "ALL"}
-    }
-  ]
-}
-JSON
-)
-
-webhooks_table=$(cat <<'JSON'
-{
-  "TableName": "Webhooks",
-  "AttributeDefinitions": [
     {"AttributeName": "pk", "AttributeType": "S"}
   ],
   "KeySchema": [
@@ -231,60 +195,30 @@ webhooks_table=$(cat <<'JSON'
 JSON
 )
 
-webhook_deliveries_table=$(cat <<'JSON'
+tenant_api_keys_table=$(cat <<'JSON'
 {
-  "TableName": "WebhookDeliveries",
+  "TableName": "TenantAPIKeys",
   "AttributeDefinitions": [
-    {"AttributeName": "pk", "AttributeType": "S"},
-    {"AttributeName": "sortKey", "AttributeType": "S"},
-    {"AttributeName": "tenantId", "AttributeType": "S"},
-    {"AttributeName": "ts", "AttributeType": "S"}
+    { "AttributeName": "tenantId", "AttributeType": "S" },
+    { "AttributeName": "keyId", "AttributeType": "S" },
+    { "AttributeName": "apiKey", "AttributeType": "S" },
+    { "AttributeName": "createdAt", "AttributeType": "S" }
   ],
   "KeySchema": [
-    {"AttributeName": "pk", "KeyType": "HASH"},
-    {"AttributeName": "sortKey", "KeyType": "RANGE"}
+    { "AttributeName": "tenantId", "KeyType": "HASH" },
+    { "AttributeName": "keyId", "KeyType": "RANGE" }
   ],
   "BillingMode": "PAY_PER_REQUEST",
   "GlobalSecondaryIndexes": [
     {
-      "IndexName": "byTenantRecent",
+      "IndexName": "byApiKey",
       "KeySchema": [
-        {"AttributeName": "tenantId", "KeyType": "HASH"},
-        {"AttributeName": "ts", "KeyType": "RANGE"}
+        { "AttributeName": "apiKey", "KeyType": "HASH" },
+        {"AttributeName": "createdAt", "KeyType": "RANGE"}
       ],
-      "Projection": {"ProjectionType": "ALL"}
+      "Projection": { "ProjectionType": "ALL" }
     }
   ]
-}
-JSON
-)
-
-audit_log_table=$(cat <<'JSON'
-{
-  "TableName": "AuditLog",
-  "AttributeDefinitions": [
-    {"AttributeName": "pk", "AttributeType": "S"},
-    {"AttributeName": "sortKey", "AttributeType": "S"}
-  ],
-  "KeySchema": [
-    {"AttributeName": "pk", "KeyType": "HASH"},
-    {"AttributeName": "sortKey", "KeyType": "RANGE"}
-  ],
-  "BillingMode": "PAY_PER_REQUEST"
-}
-JSON
-)
-
-analytics_daily_table=$(cat <<'JSON'
-{
-  "TableName": "AnalyticsDaily",
-  "AttributeDefinitions": [
-    {"AttributeName": "pk", "AttributeType": "S"}
-  ],
-  "KeySchema": [
-    {"AttributeName": "pk", "KeyType": "HASH"}
-  ],
-  "BillingMode": "PAY_PER_REQUEST"
 }
 JSON
 )
@@ -295,10 +229,7 @@ create_table "TenantInvites" "$tenant_invites_table"
 create_table "Conversations" "$conversations_table"
 create_table "Messages" "$messages_table"
 create_table "Visitors" "$visitors_table"
-create_table "Webhooks" "$webhooks_table"
-create_table "WebhookDeliveries" "$webhook_deliveries_table"
-create_table "AuditLog" "$audit_log_table"
-create_table "AnalyticsDaily" "$analytics_daily_table"
+create_table "TenantAPIKeys" "$tenant_api_keys_table"
 
 ensure_ttl "Messages" "expireAt"
 
