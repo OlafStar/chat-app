@@ -19,6 +19,7 @@ type ConversationEndpoints interface {
 	Conversations(http.ResponseWriter, *http.Request) error
 	ConversationMessages(http.ResponseWriter, *http.Request) error
 	Websocket(http.ResponseWriter, *http.Request) error
+	NotificationsWebsocket(http.ResponseWriter, *http.Request) error
 }
 
 type ConversationPaths struct {
@@ -27,6 +28,7 @@ type ConversationPaths struct {
 	TenantConversationsPath          string
 	TenantConversationPrefix         string
 	WebsocketPrefix                  string
+	TenantNotificationPath           string
 }
 
 type conversationEndpoints struct {
@@ -43,6 +45,7 @@ func NewConversationEndpoints(service *conversationservice.Service, handler *web
 		TenantConversationsPath:          base + "/conversations",
 		TenantConversationPrefix:         base + "/conversations/",
 		WebsocketPrefix:                  base + "/ws/conversations/",
+		TenantNotificationPath:           base + "/ws/notifications",
 	})
 }
 
@@ -139,6 +142,58 @@ func (h *conversationEndpoints) Websocket(w http.ResponseWriter, r *http.Request
 			ErrorLog:   fmt.Errorf("websocket role invalid: %s", role),
 		}
 	}
+}
+
+func (h *conversationEndpoints) NotificationsWebsocket(w http.ResponseWriter, r *http.Request) error {
+	if strings.TrimSpace(h.paths.TenantNotificationPath) == "" {
+		return &HTTPError{
+			StatusCode: http.StatusNotFound,
+			Message:    "Websocket not configured",
+			ErrorLog:   fmt.Errorf("notification websocket path not configured"),
+		}
+	}
+
+	if h.handler == nil {
+		return &HTTPError{
+			StatusCode: http.StatusServiceUnavailable,
+			Message:    "Websocket not available",
+			ErrorLog:   fmt.Errorf("notification websocket handler missing"),
+		}
+	}
+
+	token := strings.TrimSpace(r.URL.Query().Get("token"))
+	if token == "" {
+		return &HTTPError{
+			StatusCode: http.StatusUnauthorized,
+			Message:    "Missing token",
+			ErrorLog:   fmt.Errorf("notification websocket missing token"),
+		}
+	}
+
+	identity, err := h.service.IdentityFromToken(token)
+	if err != nil {
+		return h.serviceError(err)
+	}
+	if identity.TenantID == "" {
+		return &HTTPError{
+			StatusCode: http.StatusUnauthorized,
+			Message:    "Unauthorized",
+			ErrorLog:   fmt.Errorf("notification websocket missing tenant"),
+		}
+	}
+
+	roomID := tenantNotificationRoomID(identity.TenantID)
+	if roomID == "" {
+		return &HTTPError{
+			StatusCode: http.StatusInternalServerError,
+			Message:    "Unable to resolve notification room",
+			ErrorLog:   fmt.Errorf("notification websocket invalid tenant room"),
+		}
+	}
+
+	h.ensureRoom(roomID)
+	h.handler.JoinRoom(w, r, roomID, identity.UserID)
+	return nil
 }
 
 func (h *conversationEndpoints) handleCreateConversation(w http.ResponseWriter, r *http.Request) error {
@@ -418,12 +473,26 @@ func (h *conversationEndpoints) broadcastEvent(eventType string, conversation mo
 		"broadcastedAt": time.Now().UTC().Format(time.RFC3339),
 	}
 
-	if err := websocket.Publish(conversation.ConversationID, payload); err != nil {
-		fmt.Printf("failed to publish websocket payload for conversation %s: %v\n", conversation.ConversationID, err)
+	h.notifyRoom(conversation.ConversationID, payload)
+	h.notifyTenant(conversation.TenantID, payload)
+}
+
+func (h *conversationEndpoints) notifyTenant(tenantID string, payload interface{}) {
+	roomID := tenantNotificationRoomID(tenantID)
+	h.notifyRoom(roomID, payload)
+}
+
+func (h *conversationEndpoints) notifyRoom(roomID string, payload interface{}) {
+	if roomID == "" {
+		return
+	}
+
+	if err := websocket.Publish(roomID, payload); err != nil {
+		fmt.Printf("failed to publish websocket payload for room %s: %v\n", roomID, err)
 	}
 
 	if h.handler != nil {
-		h.handler.NotifyRoom(conversation.ConversationID, payload)
+		h.handler.NotifyRoom(roomID, payload)
 	}
 }
 
@@ -500,4 +569,12 @@ func cloneMetadata(in map[string]string) map[string]string {
 		out[k] = v
 	}
 	return out
+}
+
+func tenantNotificationRoomID(tenantID string) string {
+	tenantID = strings.TrimSpace(tenantID)
+	if tenantID == "" {
+		return ""
+	}
+	return fmt.Sprintf("tenant:%s:notifications", tenantID)
 }

@@ -41,10 +41,12 @@ func ConversationWebsocketRoutes(prefix string) api.RouteRegistrar {
 	return func(mux *http.ServeMux, s *api.APIServer) {
 		service := conversationservice.New(s.Database())
 		paths := endpoints.ConversationPaths{
-			WebsocketPrefix: strings.TrimRight(prefix, "/") + "/conversations/",
+			WebsocketPrefix:        strings.TrimRight(prefix, "/") + "/conversations/",
+			TenantNotificationPath: strings.TrimRight(prefix, "/") + "/notifications",
 		}
 		convEndpoints := endpoints.NewConversationEndpointsWithPaths(service, s.Handler(), paths)
 
 		mux.HandleFunc(prefix+"/conversations/", s.MakeHTTPHandleFunc(convEndpoints.Websocket))
+		mux.HandleFunc(prefix+"/notifications", s.MakeHTTPHandleFunc(convEndpoints.NotificationsWebsocket))
 	}
 }

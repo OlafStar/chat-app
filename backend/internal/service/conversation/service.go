@@ -629,6 +629,14 @@ func (s *Service) IdentityFromAuthorizationHeader(header string) (Identity, erro
 	return s.identityFromToken(token)
 }
 
+func (s *Service) IdentityFromToken(token string) (Identity, error) {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return Identity{}, newError(ErrorCodeUnauthorized, "empty token", nil)
+	}
+	return s.identityFromToken(token)
+}
+
 func (s *Service) identityFromToken(token string) (Identity, error) {
 	if token == "" {
 		return Identity{}, newError(ErrorCodeUnauthorized, "empty token", nil)
