@@ -58,6 +58,15 @@ type PostVisitorMessageRequest struct {
 	VisitorToken string `json:"visitorToken"`
 }
 
+type AssignConversationEmailRequest struct {
+	Email        string `json:"email"`
+	VisitorToken string `json:"visitorToken"`
+}
+
+type AssignConversationEmailResponse struct {
+	Conversation ConversationMetadata `json:"conversation"`
+}
+
 type PostAgentMessageRequest struct {
 	Body string `json:"body"`
 }

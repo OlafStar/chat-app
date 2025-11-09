@@ -144,6 +144,60 @@
         flex-direction: column;
         gap: 8px;
       }
+      .pingy-chat-offline {
+        padding: 12px;
+        border-top: 1px solid #e2e8f0;
+        background: #f1f5f9;
+        display: none;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .pingy-chat-offline-note {
+        font-size: 12px;
+        color: #475569;
+      }
+      .pingy-chat-offline-controls {
+        display: flex;
+        gap: 8px;
+      }
+      .pingy-chat-offline-input {
+        flex: 1;
+        border: 1px solid #cbd5f5;
+        border-radius: 10px;
+        padding: 8px 10px;
+        font-size: 13px;
+        font-family: inherit;
+        outline: none;
+      }
+      .pingy-chat-offline-input:focus {
+        border-color: ${themeColor};
+        box-shadow: 0 0 0 2px rgba(127,86,217,0.12);
+      }
+      .pingy-chat-offline-save {
+        background: ${themeColor};
+        color: #ffffff;
+        border: none;
+        border-radius: 999px;
+        padding: 8px 14px;
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .pingy-chat-offline-save:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+      .pingy-chat-offline-status {
+        font-size: 12px;
+        color: #475569;
+      }
+      .pingy-chat-offline-status-error {
+        color: #b42318;
+      }
+      .pingy-chat-offline-status-success {
+        color: #15803d;
+      }
       .pingy-chat-input textarea {
         resize: none;
         border: 1px solid #cbd5f5;
@@ -209,6 +263,36 @@
     const messages = document.createElement("div");
     messages.className = "pingy-chat-messages";
 
+    const offlineContainer = document.createElement("div");
+    offlineContainer.className = "pingy-chat-offline";
+
+    const offlineNote = document.createElement("div");
+    offlineNote.className = "pingy-chat-offline-note";
+    offlineNote.textContent = "Leave your email so we can reply even if you step away.";
+
+    const offlineControls = document.createElement("div");
+    offlineControls.className = "pingy-chat-offline-controls";
+
+    const offlineInput = document.createElement("input");
+    offlineInput.type = "email";
+    offlineInput.placeholder = "you@example.com";
+    offlineInput.className = "pingy-chat-offline-input";
+
+    const offlineSave = document.createElement("button");
+    offlineSave.className = "pingy-chat-offline-save";
+    offlineSave.textContent = "Save email";
+    offlineSave.disabled = true;
+
+    offlineControls.appendChild(offlineInput);
+    offlineControls.appendChild(offlineSave);
+
+    const offlineStatus = document.createElement("div");
+    offlineStatus.className = "pingy-chat-offline-status";
+
+    offlineContainer.appendChild(offlineNote);
+    offlineContainer.appendChild(offlineControls);
+    offlineContainer.appendChild(offlineStatus);
+
     const inputContainer = document.createElement("div");
     inputContainer.className = "pingy-chat-input";
 
@@ -229,6 +313,7 @@
 
     windowEl.appendChild(header);
     windowEl.appendChild(messages);
+    windowEl.appendChild(offlineContainer);
     windowEl.appendChild(inputContainer);
 
     document.body.appendChild(bubble);
@@ -241,6 +326,10 @@
       messages,
       textarea,
       sendBtn,
+      offlineContainer,
+      offlineInput,
+      offlineButton: offlineSave,
+      offlineStatus,
     };
   }
 
@@ -280,8 +369,13 @@
       websocket: null,
       isSending: false,
       isLoadingMessages: false,
+      isSavingEmail: false,
+      offlineMessage: "",
+      offlineMessageType: "info",
       renderedMessageIds: new Set(),
     };
+
+    updateOfflineControls(state);
 
     // If we have a stored conversation, fetch messages from API
     if (state.conversation && state.conversation.conversationId && state.conversation.visitorToken) {
@@ -312,6 +406,7 @@
       conversationId: payload.conversationId,
       visitorToken: payload.visitorToken,
       visitorId: payload.visitorId,
+      visitorEmail: payload.visitorEmail || "",
     };
   }
 
@@ -324,6 +419,7 @@
       conversationId: state.conversation.conversationId,
       visitorToken: state.conversation.visitorToken,
       visitorId: state.conversation.visitorId,
+      visitorEmail: state.conversation.visitorEmail || "",
     };
     window.localStorage.setItem(state.config.storageKey, JSON.stringify(payload));
   }
@@ -394,7 +490,7 @@
   }
 
   function wireEvents(state) {
-    const { bubble, close, sendBtn, textarea, windowEl } = state.elements;
+    const { bubble, close, sendBtn, textarea, windowEl, offlineButton, offlineInput } = state.elements;
 
     bubble.addEventListener("click", () => toggleWindow(state));
     close.addEventListener("click", () => closeWindow(state));
@@ -412,6 +508,22 @@
         return;
       }
     });
+
+    if (offlineButton && offlineInput) {
+      offlineButton.addEventListener("click", () => assignOfflineEmail(state));
+      offlineInput.addEventListener("input", () => {
+        if (state.offlineMessageType === "error") {
+          setOfflineMessage(state, "", "info");
+        }
+        updateOfflineControls(state);
+      });
+      offlineInput.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          assignOfflineEmail(state);
+        }
+      });
+    }
   }
 
   function toggleWindow(state) {
@@ -457,6 +569,9 @@
     clearMessages(state);
     state.config.tenantKey = newKey;
     state.config.storageKey = `${STORAGE_PREFIX}_${newKey}_${state.config.apiBase || "same-origin"}`;
+    state.isSavingEmail = false;
+    setOfflineMessage(state, "", "info");
+    updateOfflineControls(state);
   }
 
   function flushConversation(state) {
@@ -464,6 +579,9 @@
     state.conversation = null;
     window.localStorage.removeItem(state.config.storageKey);
     clearMessages(state);
+    state.isSavingEmail = false;
+    setOfflineMessage(state, "", "info");
+    updateOfflineControls(state);
   }
 
   function sendMessage(state) {
@@ -491,6 +609,140 @@
       });
   }
 
+  function assignOfflineEmail(state) {
+    if (!state || !state.elements || !state.elements.offlineInput) return Promise.resolve();
+
+    if (!state.conversation || !state.conversation.conversationId || !state.conversation.visitorToken) {
+      setOfflineMessage(state, "Please send a message first so we can start the chat.", "error");
+      updateOfflineControls(state);
+      return Promise.resolve();
+    }
+
+    const email = state.elements.offlineInput.value.trim();
+    if (!isLikelyEmail(email)) {
+      setOfflineMessage(state, "Enter a valid email address.", "error");
+      updateOfflineControls(state);
+      return Promise.resolve();
+    }
+
+    if (state.isSavingEmail) {
+      return Promise.resolve();
+    }
+
+    state.isSavingEmail = true;
+    setOfflineMessage(state, "", "info");
+    updateOfflineControls(state);
+
+    const url = joinUrl(
+      state.config.apiBase,
+      `/api/public/v1/conversations/${encodeURIComponent(state.conversation.conversationId)}/email`
+    );
+
+    const payload = {
+      email,
+      visitorToken: state.conversation.visitorToken,
+    };
+
+    return fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Tenant-Key": state.config.tenantKey,
+        "X-Visitor-Token": state.conversation.visitorToken,
+      },
+      body: JSON.stringify(payload),
+    })
+      .then(checkStatus)
+      .then((response) => response.json())
+      .then((data) => {
+        const updatedEmail = data && data.conversation && data.conversation.visitorEmail
+          ? data.conversation.visitorEmail
+          : email;
+        state.conversation.visitorEmail = updatedEmail;
+        persistConversation(state);
+        setOfflineMessage(state, "Great! We'll email you as soon as someone replies.", "success");
+      })
+      .catch((error) => {
+        console.warn("PingyChatWidget: Failed to save offline email", error);
+        setOfflineMessage(state, "We couldn't save your email. Please try again.", "error");
+      })
+      .finally(() => {
+        state.isSavingEmail = false;
+        updateOfflineControls(state);
+      });
+  }
+
+  function refreshOfflineButtonState(state) {
+    const { offlineButton, offlineInput } = state.elements || {};
+    if (!offlineButton || !offlineInput) return;
+    const hasConversation = Boolean(state.conversation && state.conversation.conversationId);
+    const email = (offlineInput.value || "").trim();
+    offlineButton.disabled =
+      state.isSavingEmail || !hasConversation || !isLikelyEmail(email);
+  }
+
+  function updateOfflineControls(state) {
+    const { offlineContainer, offlineInput, offlineButton, offlineStatus } = state.elements || {};
+    if (!offlineContainer || !offlineInput || !offlineButton || !offlineStatus) {
+      return;
+    }
+
+    const hasConversation = Boolean(state.conversation && state.conversation.conversationId && state.conversation.visitorToken);
+    offlineContainer.style.display = hasConversation ? "flex" : "none";
+
+    if (!hasConversation) {
+      offlineInput.value = "";
+      offlineInput.disabled = true;
+      offlineButton.disabled = true;
+      offlineStatus.textContent = "";
+      offlineStatus.classList.remove("pingy-chat-offline-status-error", "pingy-chat-offline-status-success");
+      return;
+    }
+
+    offlineInput.disabled = state.isSavingEmail;
+
+    if (!state.isSavingEmail && document.activeElement !== offlineInput) {
+      offlineInput.value = state.conversation && state.conversation.visitorEmail
+        ? state.conversation.visitorEmail
+        : offlineInput.value;
+    }
+
+    const statusClasses = offlineStatus.classList;
+    statusClasses.remove("pingy-chat-offline-status-error", "pingy-chat-offline-status-success");
+
+    if (state.offlineMessage) {
+      offlineStatus.textContent = state.offlineMessage;
+      if (state.offlineMessageType === "error") {
+        statusClasses.add("pingy-chat-offline-status-error");
+      } else if (state.offlineMessageType === "success") {
+        statusClasses.add("pingy-chat-offline-status-success");
+      }
+    } else if (state.conversation && state.conversation.visitorEmail) {
+      offlineStatus.textContent = `We'll email you at ${state.conversation.visitorEmail}.`;
+      statusClasses.add("pingy-chat-offline-status-success");
+    } else {
+      offlineStatus.textContent = "Share your email so we can follow up when you're offline.";
+    }
+
+    refreshOfflineButtonState(state);
+  }
+
+  function setOfflineMessage(state, message, type) {
+    state.offlineMessage = message || "";
+    state.offlineMessageType = type || "info";
+  }
+
+  function isLikelyEmail(value) {
+    if (!value) return false;
+    const trimmed = value.trim();
+    if (!trimmed) return false;
+    const parts = trimmed.split("@");
+    if (parts.length !== 2) return false;
+    const [local, domain] = parts;
+    if (!local || !domain || domain.indexOf(".") === -1) return false;
+    return true;
+  }
+
   function createConversation(state, body) {
     const url = joinUrl(state.config.apiBase, "/api/public/v1/conversations");
     const payload = { message: { body }, visitor: {} };
@@ -510,10 +762,12 @@
           conversationId: data.conversation.conversationId,
           visitorToken: data.visitorToken,
           visitorId: data.visitorId,
+          visitorEmail: data.conversation.visitorEmail || "",
         };
         appendMessageToDOM(state, data.message);
         scrollMessages(state.elements.messages);
         persistConversation(state);
+        updateOfflineControls(state);
         connectWebsocket(state);
       });
   }

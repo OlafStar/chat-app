@@ -105,6 +105,20 @@ func (m *memoryRepository) UpdateConversationActivity(ctx context.Context, tenan
 	return nil
 }
 
+func (m *memoryRepository) UpdateConversationVisitorEmail(ctx context.Context, tenantID, conversationID, visitorEmail, updatedAt string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	pk := model.ConversationPK(tenantID, conversationID)
+	conversation, ok := m.conversations[pk]
+	if !ok {
+		return ErrNotFound
+	}
+	conversation.VisitorEmail = visitorEmail
+	conversation.UpdatedAt = updatedAt
+	m.conversations[pk] = conversation
+	return nil
+}
+
 func (m *memoryRepository) GetConversation(ctx context.Context, tenantID, conversationID string) (model.ConversationItem, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -201,6 +215,68 @@ func TestCreateConversation(t *testing.T) {
 	}
 	if result.VisitorToken == "" {
 		t.Fatal("expected visitor token")
+	}
+}
+
+func TestAssignVisitorEmail(t *testing.T) {
+	repo := newMemoryRepository()
+	now := time.Date(2024, 1, 2, 15, 0, 0, 0, time.UTC)
+	svc := NewWithRepository(repo, func() time.Time { return now })
+	useTestSecret(t)
+
+	tenantID := "tenant-123"
+	visitorID := "visitor-123"
+	conversationID := "conversation-123"
+
+	repo.tenants[tenantID] = model.TenantItem{TenantID: tenantID}
+	repo.visitors[model.VisitorPK(tenantID, visitorID)] = model.VisitorItem{
+		PK:        model.VisitorPK(tenantID, visitorID),
+		TenantID:  tenantID,
+		VisitorID: visitorID,
+		CreatedAt: now.Add(-time.Hour).Format(time.RFC3339),
+	}
+	repo.conversations[model.ConversationPK(tenantID, conversationID)] = model.ConversationItem{
+		PK:             model.ConversationPK(tenantID, conversationID),
+		ConversationID: conversationID,
+		TenantID:       tenantID,
+		VisitorID:      visitorID,
+		Status:         model.ConversationStatusOpen,
+		CreatedAt:      now.Add(-time.Hour).Format(time.RFC3339),
+		UpdatedAt:      now.Add(-time.Hour).Format(time.RFC3339),
+		LastMessageAt:  now.Add(-time.Hour).Format(time.RFC3339),
+	}
+
+	token, err := signVisitorToken(visitorTokenClaims{
+		TenantID:       tenantID,
+		ConversationID: conversationID,
+		VisitorID:      visitorID,
+		IssuedAt:       now.Unix(),
+		ExpiresAt:      now.Add(24 * time.Hour).Unix(),
+	})
+	if err != nil {
+		t.Fatalf("failed to sign visitor token: %v", err)
+	}
+
+	result, err := svc.AssignVisitorEmail(context.Background(), token, "User@Example.com")
+	if err != nil {
+		t.Fatalf("AssignVisitorEmail error: %v", err)
+	}
+
+	if want := "user@example.com"; result.VisitorEmail != want {
+		t.Fatalf("unexpected visitor email: got %s want %s", result.VisitorEmail, want)
+	}
+
+	storedConv, _ := repo.GetConversation(context.Background(), tenantID, conversationID)
+	if storedConv.VisitorEmail != "user@example.com" {
+		t.Fatalf("conversation not updated: %+v", storedConv)
+	}
+
+	storedVisitor, _ := repo.GetVisitor(context.Background(), tenantID, visitorID)
+	if storedVisitor.Email != "user@example.com" {
+		t.Fatalf("visitor not updated: %+v", storedVisitor)
+	}
+	if storedVisitor.LastSeenAt == "" {
+		t.Fatalf("visitor last seen not set")
 	}
 }
 

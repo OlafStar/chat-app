@@ -116,6 +116,20 @@ func (m *memoryRepository) UpdateConversationActivity(ctx context.Context, tenan
 	return nil
 }
 
+func (m *memoryRepository) UpdateConversationVisitorEmail(ctx context.Context, tenantID, conversationID, visitorEmail, updatedAt string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	pk := model.ConversationPK(tenantID, conversationID)
+	conv, ok := m.conversations[pk]
+	if !ok {
+		return conversationservice.ErrNotFound
+	}
+	conv.VisitorEmail = visitorEmail
+	conv.UpdatedAt = updatedAt
+	m.conversations[pk] = conv
+	return nil
+}
+
 func (m *memoryRepository) GetConversation(ctx context.Context, tenantID, conversationID string) (model.ConversationItem, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -335,6 +349,76 @@ func TestPublicListMessagesSuccess(t *testing.T) {
 	}
 	if resp.Messages[0].Body != "Hello" {
 		t.Fatalf("unexpected message body %s", resp.Messages[0].Body)
+	}
+}
+
+func TestAssignVisitorEmailSuccess(t *testing.T) {
+	handler, svc, repo := setupConversationTestHandler(t)
+	repo.tenants["tenant-1"] = model.TenantItem{TenantID: "tenant-1"}
+	repo.keys["public-key"] = "tenant-1"
+
+	result, err := svc.CreateConversation(context.Background(), conversationservice.CreateConversationParams{
+		TenantAPIKey: "public-key",
+		Message:      "Hello",
+		Visitor:      conversationservice.VisitorParams{Name: "Visitor"},
+	})
+	if err != nil {
+		t.Fatalf("CreateConversation error: %v", err)
+	}
+
+	payload := dto.AssignConversationEmailRequest{
+		VisitorToken: result.VisitorToken,
+		Email:        "visitor@example.com",
+	}
+	body, _ := json.Marshal(payload)
+	req := httptest.NewRequest(http.MethodPost, "/api/public/conversations/"+result.Conversation.ConversationID+"/email", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Tenant-Key", "public-key")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+
+	var resp dto.AssignConversationEmailResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Conversation.VisitorEmail != "visitor@example.com" {
+		t.Fatalf("expected visitor email, got %+v", resp.Conversation)
+	}
+}
+
+func TestAssignVisitorEmailRequiresValidEmail(t *testing.T) {
+	handler, svc, repo := setupConversationTestHandler(t)
+	repo.tenants["tenant-1"] = model.TenantItem{TenantID: "tenant-1"}
+	repo.keys["public-key"] = "tenant-1"
+
+	result, err := svc.CreateConversation(context.Background(), conversationservice.CreateConversationParams{
+		TenantAPIKey: "public-key",
+		Message:      "Hello",
+		Visitor:      conversationservice.VisitorParams{Name: "Visitor"},
+	})
+	if err != nil {
+		t.Fatalf("CreateConversation error: %v", err)
+	}
+
+	payload := dto.AssignConversationEmailRequest{
+		VisitorToken: result.VisitorToken,
+		Email:        "",
+	}
+	body, _ := json.Marshal(payload)
+	req := httptest.NewRequest(http.MethodPost, "/api/public/conversations/"+result.Conversation.ConversationID+"/email", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Tenant-Key", "public-key")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d", rec.Code)
 	}
 }
 

@@ -61,6 +61,13 @@ func (h *conversationEndpoints) PublicConversations(w http.ResponseWriter, r *ht
 }
 
 func (h *conversationEndpoints) PublicConversationMessages(w http.ResponseWriter, r *http.Request) error {
+	trimmed := strings.TrimRight(r.URL.Path, "/")
+	if strings.HasSuffix(trimmed, "/email") {
+		return MethodHandler(w, r, map[string]func(http.ResponseWriter, *http.Request) error{
+			http.MethodPost: h.handleAssignVisitorEmail,
+		})
+	}
+
 	return MethodHandler(w, r, map[string]func(http.ResponseWriter, *http.Request) error{
 		http.MethodGet:  h.handleListPublicMessages,
 		http.MethodPost: h.handlePostVisitorMessage,
@@ -207,6 +214,47 @@ func (h *conversationEndpoints) handlePostVisitorMessage(w http.ResponseWriter, 
 	return api.WriteJSON(w, http.StatusCreated, toMessageResponse(result.Message))
 }
 
+func (h *conversationEndpoints) handleAssignVisitorEmail(w http.ResponseWriter, r *http.Request) error {
+	convID, err := h.extractPublicEmailPath(r.URL.Path)
+	if err != nil {
+		return err
+	}
+
+	var req dto.AssignConversationEmailRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		return &HTTPError{
+			StatusCode: http.StatusBadRequest,
+			Message:    "Invalid request payload",
+			ErrorLog:   fmt.Errorf("decode visitor email request: %w", err),
+		}
+	}
+
+	req.Email = strings.TrimSpace(req.Email)
+	req.VisitorToken = strings.TrimSpace(req.VisitorToken)
+	if req.VisitorToken == "" {
+		req.VisitorToken = strings.TrimSpace(r.Header.Get("X-Visitor-Token"))
+	}
+
+	conversation, err := h.service.AssignVisitorEmail(r.Context(), req.VisitorToken, req.Email)
+	if err != nil {
+		return h.serviceError(err)
+	}
+
+	if conversation.ConversationID != convID {
+		return &HTTPError{
+			StatusCode: http.StatusForbidden,
+			Message:    "Token does not match conversation",
+			ErrorLog:   fmt.Errorf("visitor email path mismatch: %s vs %s", convID, conversation.ConversationID),
+		}
+	}
+
+	resp := dto.AssignConversationEmailResponse{
+		Conversation: toConversationMetadata(conversation),
+	}
+
+	return api.WriteJSON(w, http.StatusOK, resp)
+}
+
 func (h *conversationEndpoints) handleListPublicMessages(w http.ResponseWriter, r *http.Request) error {
 	conversationID, err := h.extractPublicMessagePath(r.URL.Path)
 	if err != nil {
@@ -305,17 +353,25 @@ func (h *conversationEndpoints) handlePostAgentMessage(w http.ResponseWriter, r 
 }
 
 func (h *conversationEndpoints) extractPublicMessagePath(path string) (string, error) {
+	return h.extractPublicConversationAction(path, "messages")
+}
+
+func (h *conversationEndpoints) extractPublicEmailPath(path string) (string, error) {
+	return h.extractPublicConversationAction(path, "email")
+}
+
+func (h *conversationEndpoints) extractPublicConversationAction(path, action string) (string, error) {
 	prefix := h.paths.PublicConversationMessagesPrefix
 	if prefix == "" {
-		return "", &HTTPError{StatusCode: http.StatusNotFound, Message: "Conversation not found", ErrorLog: fmt.Errorf("public messaging not configured")}
+		return "", &HTTPError{StatusCode: http.StatusNotFound, Message: "Conversation not found", ErrorLog: fmt.Errorf("public route not configured")}
 	}
 	trimmed := strings.TrimPrefix(path, prefix)
 	if trimmed == path {
-		return "", &HTTPError{StatusCode: http.StatusNotFound, Message: "Conversation not found", ErrorLog: fmt.Errorf("public messages path mismatch: %s", path)}
+		return "", &HTTPError{StatusCode: http.StatusNotFound, Message: "Conversation not found", ErrorLog: fmt.Errorf("public path mismatch: %s", path)}
 	}
 	parts := strings.Split(strings.Trim(trimmed, "/"), "/")
-	if len(parts) != 2 || parts[1] != "messages" {
-		return "", &HTTPError{StatusCode: http.StatusNotFound, Message: "Conversation not found", ErrorLog: fmt.Errorf("invalid public message path: %s", path)}
+	if len(parts) != 2 || parts[1] != action {
+		return "", &HTTPError{StatusCode: http.StatusNotFound, Message: "Conversation not found", ErrorLog: fmt.Errorf("invalid public %s path: %s", action, path)}
 	}
 	return parts[0], nil
 }

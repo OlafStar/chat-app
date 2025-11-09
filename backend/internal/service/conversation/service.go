@@ -355,6 +355,81 @@ func (s *Service) PostVisitorMessage(ctx context.Context, token, body string) (M
 	}, nil
 }
 
+func (s *Service) AssignVisitorEmail(ctx context.Context, token, email string) (model.ConversationItem, error) {
+	email = normalizeEmail(email)
+	if !isValidEmail(email) {
+		return model.ConversationItem{}, newError(ErrorCodeValidation, "a valid email is required", nil)
+	}
+
+	access, err := s.ValidateVisitorAccess(token)
+	if err != nil {
+		return model.ConversationItem{}, err
+	}
+
+	conversation, err := s.repo.GetConversation(ctx, access.TenantID, access.ConversationID)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return model.ConversationItem{}, newError(ErrorCodeNotFound, "conversation not found", err)
+		}
+		return model.ConversationItem{}, newError(ErrorCodeInternal, "failed to fetch conversation", err)
+	}
+
+	if conversation.VisitorID != access.VisitorID {
+		return model.ConversationItem{}, newError(ErrorCodeForbidden, "token does not match conversation", nil)
+	}
+
+	now := s.now().UTC()
+	nowStr := now.Format(time.RFC3339)
+
+	if err := s.repo.UpdateConversationVisitorEmail(ctx, conversation.TenantID, conversation.ConversationID, email, nowStr); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return model.ConversationItem{}, newError(ErrorCodeNotFound, "conversation not found", err)
+		}
+		return model.ConversationItem{}, newError(ErrorCodeInternal, "failed to update conversation", err)
+	}
+
+	visitor, err := s.repo.GetVisitor(ctx, conversation.TenantID, conversation.VisitorID)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			visitor = model.VisitorItem{
+				PK:         model.VisitorPK(conversation.TenantID, conversation.VisitorID),
+				TenantID:   conversation.TenantID,
+				VisitorID:  conversation.VisitorID,
+				CreatedAt:  nowStr,
+				LastSeenAt: nowStr,
+			}
+		} else {
+			return model.ConversationItem{}, newError(ErrorCodeInternal, "failed to load visitor", err)
+		}
+	} else {
+		visitor.Email = email
+		visitor.LastSeenAt = nowStr
+	}
+
+	if visitor.PK == "" {
+		visitor.PK = model.VisitorPK(conversation.TenantID, conversation.VisitorID)
+	}
+	if visitor.TenantID == "" {
+		visitor.TenantID = conversation.TenantID
+	}
+	if visitor.VisitorID == "" {
+		visitor.VisitorID = conversation.VisitorID
+	}
+	if visitor.CreatedAt == "" {
+		visitor.CreatedAt = nowStr
+	}
+	visitor.Email = email
+
+	if err := s.repo.PutVisitor(ctx, visitor); err != nil {
+		return model.ConversationItem{}, newError(ErrorCodeInternal, "failed to persist visitor", err)
+	}
+
+	conversation.VisitorEmail = email
+	conversation.UpdatedAt = nowStr
+
+	return conversation, nil
+}
+
 func (s *Service) PostAgentMessage(ctx context.Context, identity Identity, conversationID, body string) (MessageResult, error) {
 	conversationID = strings.TrimSpace(conversationID)
 	body = strings.TrimSpace(body)
@@ -649,4 +724,22 @@ func cloneStringMap(input map[string]string) map[string]string {
 func normalizeEmail(email string) string {
 	email = strings.TrimSpace(email)
 	return strings.ToLower(email)
+}
+
+func isValidEmail(email string) bool {
+	if email == "" {
+		return false
+	}
+	parts := strings.Split(email, "@")
+	if len(parts) != 2 {
+		return false
+	}
+	local, domain := strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
+	if local == "" || domain == "" {
+		return false
+	}
+	if !strings.Contains(domain, ".") {
+		return false
+	}
+	return true
 }

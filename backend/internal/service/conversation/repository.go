@@ -24,6 +24,7 @@ type Repository interface {
 	PutVisitor(ctx context.Context, visitor model.VisitorItem) error
 	CreateConversation(ctx context.Context, conversation model.ConversationItem) error
 	UpdateConversationActivity(ctx context.Context, tenantID, conversationID, updatedAt, lastMessageAt string, assignedUserID *string) error
+	UpdateConversationVisitorEmail(ctx context.Context, tenantID, conversationID, visitorEmail, updatedAt string) error
 	GetConversation(ctx context.Context, tenantID, conversationID string) (model.ConversationItem, error)
 	ListConversations(ctx context.Context, tenantID string, limit int) ([]model.ConversationItem, error)
 	CreateMessage(ctx context.Context, message model.MessageItem) error
@@ -179,6 +180,26 @@ func (r *DynamoRepository) UpdateConversationActivity(ctx context.Context, tenan
 		updateExpr,
 		exprValues,
 		attrNames,
+		nil,
+	)
+}
+
+func (r *DynamoRepository) UpdateConversationVisitorEmail(ctx context.Context, tenantID, conversationID, visitorEmail, updatedAt string) error {
+	return r.db.Client.UpdateItem(
+		ctx,
+		model.ConversationsTable,
+		map[string]types.AttributeValue{
+			"pk": &types.AttributeValueMemberS{Value: model.ConversationPK(tenantID, conversationID)},
+		},
+		"SET #visitorEmail = :visitorEmail, #updatedAt = :updatedAt",
+		map[string]types.AttributeValue{
+			":visitorEmail": &types.AttributeValueMemberS{Value: visitorEmail},
+			":updatedAt":    &types.AttributeValueMemberS{Value: updatedAt},
+		},
+		map[string]string{
+			"#visitorEmail": "visitorEmail",
+			"#updatedAt":    "updatedAt",
+		},
 		nil,
 	)
 }
