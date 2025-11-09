@@ -22,19 +22,21 @@ func VisitorPK(tenantID, visitorID string) string {
 }
 
 type ConversationItem struct {
-	PK             string             `dynamodbav:"pk"`
-	ConversationID string             `dynamodbav:"conversationId"`
-	TenantID       string             `dynamodbav:"tenantId"`
-	VisitorID      string             `dynamodbav:"visitorId"`
-	VisitorName    string             `dynamodbav:"visitorName,omitempty"`
-	VisitorEmail   string             `dynamodbav:"visitorEmail,omitempty"`
-	Status         ConversationStatus `dynamodbav:"status"`
-	AssignedUserID string             `dynamodbav:"assignedUserId,omitempty"`
-	Metadata       map[string]string  `dynamodbav:"metadata,omitempty"`
-	OriginURL      string             `dynamodbav:"originUrl,omitempty"`
-	CreatedAt      string             `dynamodbav:"createdAt"`
-	UpdatedAt      string             `dynamodbav:"updatedAt"`
-	LastMessageAt  string             `dynamodbav:"lastMessageAt"`
+	PK              string             `dynamodbav:"pk"`
+	ConversationID  string             `dynamodbav:"conversationId"`
+	TenantID        string             `dynamodbav:"tenantId"`
+	VisitorID       string             `dynamodbav:"visitorId"`
+	VisitorName     string             `dynamodbav:"visitorName,omitempty"`
+	VisitorEmail    string             `dynamodbav:"visitorEmail,omitempty"`
+	Status          ConversationStatus `dynamodbav:"status"`
+	AssignedUserID  string             `dynamodbav:"assignedUserId,omitempty"`
+	TenantStartedAt string             `dynamodbav:"tenantStartedAt,omitempty"`
+	TenantStartedBy string             `dynamodbav:"tenantStartedBy,omitempty"`
+	Metadata        map[string]string  `dynamodbav:"metadata,omitempty"`
+	OriginURL       string             `dynamodbav:"originUrl,omitempty"`
+	CreatedAt       string             `dynamodbav:"createdAt"`
+	UpdatedAt       string             `dynamodbav:"updatedAt"`
+	LastMessageAt   string             `dynamodbav:"lastMessageAt"`
 }
 
 type MessageItem struct {

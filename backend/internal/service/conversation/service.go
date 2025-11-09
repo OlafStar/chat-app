@@ -485,6 +485,14 @@ func (s *Service) PostAgentMessage(ctx context.Context, identity Identity, conve
 		return MessageResult{}, newError(ErrorCodeInternal, "failed to store message", err)
 	}
 
+	if conversation.TenantStartedAt == "" {
+		if err := s.repo.MarkConversationTenantStart(ctx, identity.TenantID, conversation.ConversationID, nowStr, identity.UserID); err != nil {
+			return MessageResult{}, newError(ErrorCodeInternal, "failed to mark conversation start", err)
+		}
+		conversation.TenantStartedAt = nowStr
+		conversation.TenantStartedBy = identity.UserID
+	}
+
 	var assigned *string
 	if conversation.AssignedUserID == "" {
 		assigned = &identity.UserID

@@ -25,6 +25,7 @@ type Repository interface {
 	CreateConversation(ctx context.Context, conversation model.ConversationItem) error
 	UpdateConversationActivity(ctx context.Context, tenantID, conversationID, updatedAt, lastMessageAt string, assignedUserID *string) error
 	UpdateConversationVisitorEmail(ctx context.Context, tenantID, conversationID, visitorEmail, updatedAt string) error
+	MarkConversationTenantStart(ctx context.Context, tenantID, conversationID, startedAt, userID string) error
 	GetConversation(ctx context.Context, tenantID, conversationID string) (model.ConversationItem, error)
 	ListConversations(ctx context.Context, tenantID string, limit int) ([]model.ConversationItem, error)
 	CountConversationsStartedBetween(ctx context.Context, tenantID string, start, end time.Time) (int, error)
@@ -205,6 +206,26 @@ func (r *DynamoRepository) UpdateConversationVisitorEmail(ctx context.Context, t
 	)
 }
 
+func (r *DynamoRepository) MarkConversationTenantStart(ctx context.Context, tenantID, conversationID, startedAt, userID string) error {
+	return r.db.Client.UpdateItem(
+		ctx,
+		model.ConversationsTable,
+		map[string]types.AttributeValue{
+			"pk": &types.AttributeValueMemberS{Value: model.ConversationPK(tenantID, conversationID)},
+		},
+		"SET #tenantStartedAt = :startedAt, #tenantStartedBy = :startedBy",
+		map[string]types.AttributeValue{
+			":startedAt": &types.AttributeValueMemberS{Value: startedAt},
+			":startedBy": &types.AttributeValueMemberS{Value: userID},
+		},
+		map[string]string{
+			"#tenantStartedAt": "tenantStartedAt",
+			"#tenantStartedBy": "tenantStartedBy",
+		},
+		nil,
+	)
+}
+
 func (r *DynamoRepository) GetConversation(ctx context.Context, tenantID, conversationID string) (model.ConversationItem, error) {
 	var conversation model.ConversationItem
 	err := r.db.Client.GetItem(
@@ -300,7 +321,7 @@ func (r *DynamoRepository) CountConversationsStartedBetween(ctx context.Context,
 		if err := attributevalue.UnmarshalMap(item, &conversation); err != nil {
 			return 0, err
 		}
-		created := parseTime(conversation.CreatedAt)
+		created := parseTime(conversation.TenantStartedAt)
 		if created.IsZero() {
 			continue
 		}

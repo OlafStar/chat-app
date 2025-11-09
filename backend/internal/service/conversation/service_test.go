@@ -119,6 +119,20 @@ func (m *memoryRepository) UpdateConversationVisitorEmail(ctx context.Context, t
 	return nil
 }
 
+func (m *memoryRepository) MarkConversationTenantStart(ctx context.Context, tenantID, conversationID, startedAt, userID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	pk := model.ConversationPK(tenantID, conversationID)
+	conversation, ok := m.conversations[pk]
+	if !ok {
+		return ErrNotFound
+	}
+	conversation.TenantStartedAt = startedAt
+	conversation.TenantStartedBy = userID
+	m.conversations[pk] = conversation
+	return nil
+}
+
 func (m *memoryRepository) GetConversation(ctx context.Context, tenantID, conversationID string) (model.ConversationItem, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -156,7 +170,7 @@ func (m *memoryRepository) CountConversationsStartedBetween(ctx context.Context,
 		if c.TenantID != tenantID {
 			continue
 		}
-		ts := parseTime(c.CreatedAt)
+		ts := parseTime(c.TenantStartedAt)
 		if ts.IsZero() {
 			continue
 		}
@@ -444,7 +458,7 @@ func TestGetConversationUsageCountsWithinPeriod(t *testing.T) {
 		UserID:   userID,
 	}
 
-	addConversation := func(id string, created time.Time) {
+	addConversation := func(id string, created time.Time, started time.Time) {
 		repo.conversations[model.ConversationPK(tenantID, id)] = model.ConversationItem{
 			PK:             model.ConversationPK(tenantID, id),
 			ConversationID: id,
@@ -454,12 +468,25 @@ func TestGetConversationUsageCountsWithinPeriod(t *testing.T) {
 			CreatedAt:      created.Format(time.RFC3339),
 			UpdatedAt:      created.Format(time.RFC3339),
 			LastMessageAt:  created.Format(time.RFC3339),
+			TenantStartedAt: func() string {
+				if started.IsZero() {
+					return ""
+				}
+				return started.Format(time.RFC3339)
+			}(),
+			TenantStartedBy: func() string {
+				if started.IsZero() {
+					return ""
+				}
+				return userID
+			}(),
 		}
 	}
 
-	addConversation("in-range-1", time.Date(2024, 3, 1, 0, 0, 0, 0, time.UTC))
-	addConversation("in-range-2", time.Date(2024, 3, 30, 10, 0, 0, 0, time.UTC))
-	addConversation("out-of-range", time.Date(2024, 2, 28, 23, 59, 0, 0, time.UTC))
+	addConversation("in-range-1", time.Date(2024, 3, 1, 0, 0, 0, 0, time.UTC), time.Date(2024, 3, 1, 2, 0, 0, 0, time.UTC))
+	addConversation("in-range-2", time.Date(2024, 3, 30, 10, 0, 0, 0, time.UTC), time.Date(2024, 3, 30, 10, 30, 0, 0, time.UTC))
+	addConversation("out-of-range", time.Date(2024, 2, 28, 23, 59, 0, 0, time.UTC), time.Date(2024, 2, 28, 23, 59, 0, 0, time.UTC))
+	addConversation("not-started", time.Date(2024, 3, 10, 0, 0, 0, 0, time.UTC), time.Time{})
 
 	start := time.Date(2024, 3, 1, 0, 0, 0, 0, time.UTC)
 	end := start.AddDate(0, 1, 0)
@@ -493,5 +520,68 @@ func TestGetConversationUsageRequiresValidIdentity(t *testing.T) {
 	}
 	if svcErr.Code != ErrorCodeUnauthorized {
 		t.Fatalf("expected unauthorized, got %s", svcErr.Code)
+	}
+}
+
+func TestPostAgentMessageMarksTenantStart(t *testing.T) {
+	repo := newMemoryRepository()
+	now := time.Date(2024, 5, 1, 12, 0, 0, 0, time.UTC)
+	svc := NewWithRepository(repo, func() time.Time { return now })
+	useTestSecret(t)
+
+	tenantID := "tenant-tenant"
+	userID := "user-agent"
+	repo.tenants[tenantID] = model.TenantItem{TenantID: tenantID}
+	repo.users[model.TenantScopedPK(tenantID, userID)] = model.UserItem{
+		PK:       model.TenantScopedPK(tenantID, userID),
+		TenantID: tenantID,
+		UserID:   userID,
+	}
+
+	conversationID := "conv-tenant"
+	repo.conversations[model.ConversationPK(tenantID, conversationID)] = model.ConversationItem{
+		PK:             model.ConversationPK(tenantID, conversationID),
+		ConversationID: conversationID,
+		TenantID:       tenantID,
+		VisitorID:      "visitor-1",
+		Status:         model.ConversationStatusOpen,
+		CreatedAt:      now.Add(-time.Hour).Format(time.RFC3339),
+		UpdatedAt:      now.Add(-time.Hour).Format(time.RFC3339),
+		LastMessageAt:  now.Add(-time.Hour).Format(time.RFC3339),
+	}
+
+	result, err := svc.PostAgentMessage(context.Background(), Identity{
+		UserID:   userID,
+		TenantID: tenantID,
+	}, conversationID, "Hello from agent")
+	if err != nil {
+		t.Fatalf("PostAgentMessage error: %v", err)
+	}
+
+	if result.Conversation.TenantStartedAt == "" {
+		t.Fatal("expected tenant started timestamp to be set")
+	}
+	if result.Conversation.TenantStartedBy != userID {
+		t.Fatalf("expected tenant started by %s, got %s", userID, result.Conversation.TenantStartedBy)
+	}
+
+	stored := repo.conversations[model.ConversationPK(tenantID, conversationID)]
+	if stored.TenantStartedAt == "" {
+		t.Fatalf("expected stored conversation to update tenantStartedAt")
+	}
+
+	firstStart := stored.TenantStartedAt
+
+	// send another message - should not change start time
+	if _, err := svc.PostAgentMessage(context.Background(), Identity{
+		UserID:   userID,
+		TenantID: tenantID,
+	}, conversationID, "Second reply"); err != nil {
+		t.Fatalf("PostAgentMessage second call error: %v", err)
+	}
+
+	stored = repo.conversations[model.ConversationPK(tenantID, conversationID)]
+	if stored.TenantStartedAt != firstStart {
+		t.Fatalf("expected tenantStartedAt to remain %s, got %s", firstStart, stored.TenantStartedAt)
 	}
 }

@@ -591,17 +591,19 @@ func (h *conversationEndpoints) serviceError(err error) error {
 
 func toConversationMetadata(item model.ConversationItem) dto.ConversationMetadata {
 	return dto.ConversationMetadata{
-		ConversationID: item.ConversationID,
-		VisitorID:      item.VisitorID,
-		VisitorName:    item.VisitorName,
-		VisitorEmail:   item.VisitorEmail,
-		Status:         string(item.Status),
-		AssignedUserID: item.AssignedUserID,
-		CreatedAt:      item.CreatedAt,
-		UpdatedAt:      item.UpdatedAt,
-		LastMessageAt:  item.LastMessageAt,
-		OriginURL:      item.OriginURL,
-		Metadata:       cloneMetadata(item.Metadata),
+		ConversationID:  item.ConversationID,
+		VisitorID:       item.VisitorID,
+		VisitorName:     item.VisitorName,
+		VisitorEmail:    item.VisitorEmail,
+		Status:          string(item.Status),
+		AssignedUserID:  item.AssignedUserID,
+		TenantStartedAt: item.TenantStartedAt,
+		TenantStartedBy: item.TenantStartedBy,
+		CreatedAt:       item.CreatedAt,
+		UpdatedAt:       item.UpdatedAt,
+		LastMessageAt:   item.LastMessageAt,
+		OriginURL:       item.OriginURL,
+		Metadata:        cloneMetadata(item.Metadata),
 	}
 }
 

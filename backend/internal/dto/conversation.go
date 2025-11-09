@@ -1,17 +1,19 @@
 package dto
 
 type ConversationMetadata struct {
-	ConversationID string            `json:"conversationId"`
-	VisitorID      string            `json:"visitorId"`
-	VisitorName    string            `json:"visitorName,omitempty"`
-	VisitorEmail   string            `json:"visitorEmail,omitempty"`
-	Status         string            `json:"status"`
-	AssignedUserID string            `json:"assignedUserId,omitempty"`
-	CreatedAt      string            `json:"createdAt"`
-	UpdatedAt      string            `json:"updatedAt"`
-	LastMessageAt  string            `json:"lastMessageAt"`
-	OriginURL      string            `json:"originUrl,omitempty"`
-	Metadata       map[string]string `json:"metadata,omitempty"`
+	ConversationID  string            `json:"conversationId"`
+	VisitorID       string            `json:"visitorId"`
+	VisitorName     string            `json:"visitorName,omitempty"`
+	VisitorEmail    string            `json:"visitorEmail,omitempty"`
+	Status          string            `json:"status"`
+	AssignedUserID  string            `json:"assignedUserId,omitempty"`
+	TenantStartedAt string            `json:"tenantStartedAt,omitempty"`
+	TenantStartedBy string            `json:"tenantStartedBy,omitempty"`
+	CreatedAt       string            `json:"createdAt"`
+	UpdatedAt       string            `json:"updatedAt"`
+	LastMessageAt   string            `json:"lastMessageAt"`
+	OriginURL       string            `json:"originUrl,omitempty"`
+	Metadata        map[string]string `json:"metadata,omitempty"`
 }
 
 type MessageResponse struct {

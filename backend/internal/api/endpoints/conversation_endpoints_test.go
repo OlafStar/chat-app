@@ -130,6 +130,20 @@ func (m *memoryRepository) UpdateConversationVisitorEmail(ctx context.Context, t
 	return nil
 }
 
+func (m *memoryRepository) MarkConversationTenantStart(ctx context.Context, tenantID, conversationID, startedAt, userID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	pk := model.ConversationPK(tenantID, conversationID)
+	conv, ok := m.conversations[pk]
+	if !ok {
+		return conversationservice.ErrNotFound
+	}
+	conv.TenantStartedAt = startedAt
+	conv.TenantStartedBy = userID
+	m.conversations[pk] = conv
+	return nil
+}
+
 func (m *memoryRepository) GetConversation(ctx context.Context, tenantID, conversationID string) (model.ConversationItem, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -165,7 +179,7 @@ func (m *memoryRepository) CountConversationsStartedBetween(ctx context.Context,
 		if conv.TenantID != tenantID {
 			continue
 		}
-		createdAt, err := time.Parse(time.RFC3339, conv.CreatedAt)
+		createdAt, err := time.Parse(time.RFC3339, conv.TenantStartedAt)
 		if err != nil {
 			continue
 		}
@@ -454,7 +468,7 @@ func TestConversationUsageEndpoint(t *testing.T) {
 		Email:    "user@example.com",
 	}
 
-	addConversation := func(id string, created time.Time) {
+	addConversation := func(id string, created time.Time, started time.Time) {
 		repo.conversations[model.ConversationPK(tenantID, id)] = model.ConversationItem{
 			PK:             model.ConversationPK(tenantID, id),
 			ConversationID: id,
@@ -464,12 +478,25 @@ func TestConversationUsageEndpoint(t *testing.T) {
 			CreatedAt:      created.Format(time.RFC3339),
 			UpdatedAt:      created.Format(time.RFC3339),
 			LastMessageAt:  created.Format(time.RFC3339),
+			TenantStartedAt: func() string {
+				if started.IsZero() {
+					return ""
+				}
+				return started.Format(time.RFC3339)
+			}(),
+			TenantStartedBy: func() string {
+				if started.IsZero() {
+					return ""
+				}
+				return userID
+			}(),
 		}
 	}
 
-	addConversation("march-1", time.Date(2024, 3, 5, 12, 0, 0, 0, time.UTC))
-	addConversation("march-2", time.Date(2024, 3, 20, 9, 0, 0, 0, time.UTC))
-	addConversation("april", time.Date(2024, 4, 1, 0, 0, 0, 0, time.UTC))
+	addConversation("march-1", time.Date(2024, 3, 5, 12, 0, 0, 0, time.UTC), time.Date(2024, 3, 5, 12, 5, 0, 0, time.UTC))
+	addConversation("march-2", time.Date(2024, 3, 20, 9, 0, 0, 0, time.UTC), time.Date(2024, 3, 20, 9, 15, 0, 0, time.UTC))
+	addConversation("april", time.Date(2024, 4, 1, 0, 0, 0, 0, time.UTC), time.Date(2024, 4, 1, 0, 5, 0, 0, time.UTC))
+	addConversation("not-started", time.Date(2024, 3, 25, 0, 0, 0, 0, time.UTC), time.Time{})
 
 	token, err := internaljwt.CreateToken(
 		internaljwt.User{Id: userID, TenantID: tenantID, Email: "user@example.com"},
