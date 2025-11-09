@@ -58,6 +58,7 @@ type Identity struct {
 type AuthResult struct {
 	User        model.UserItem
 	Tenant      model.TenantItem
+	APIKeys     []model.TenantAPIKeyItem
 	Tokens      internaljwt.TokenResponse
 	Memberships []Membership
 }

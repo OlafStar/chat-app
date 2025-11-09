@@ -1,10 +1,12 @@
 package middleware
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"log"
 	"math/rand"
+	"net"
 	"net/http"
 	"time"
 
@@ -29,6 +31,26 @@ func (r *statusRecorder) Write(b []byte) (int, error) {
 	n, err := r.ResponseWriter.Write(b)
 	r.size += n
 	return n, err
+}
+
+func (r *statusRecorder) Flush() {
+	if f, ok := r.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+func (r *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if h, ok := r.ResponseWriter.(http.Hijacker); ok {
+		return h.Hijack()
+	}
+	return nil, nil, fmt.Errorf("statusRecorder: underlying ResponseWriter does not support hijacking")
+}
+
+func (r *statusRecorder) Push(target string, opts *http.PushOptions) error {
+	if p, ok := r.ResponseWriter.(http.Pusher); ok {
+		return p.Push(target, opts)
+	}
+	return http.ErrNotSupported
 }
 
 type LogEntry struct {

@@ -3,16 +3,13 @@ package model
 import "fmt"
 
 const (
-	TenantsTable           = "Tenants"
-	UsersTable             = "Users"
-	ConversationsTable     = "Conversations"
-	MessagesTable          = "Messages"
-	VisitorsTable          = "Visitors"
-	WebhooksTable          = "Webhooks"
-	WebhookDeliveriesTable = "WebhookDeliveries"
-	AuditLogTable          = "AuditLog"
-	AnalyticsDailyTable    = "AnalyticsDaily"
-	TenantInvitesTable     = "TenantInvites"
+	TenantsTable       = "Tenants"
+	UsersTable         = "Users"
+	ConversationsTable = "Conversations"
+	MessagesTable      = "Messages"
+	VisitorsTable      = "Visitors"
+	TenantInvitesTable = "TenantInvites"
+	TenantAPIKeysTable = "TenantAPIKeys"
 )
 
 type TenantItem struct {
@@ -46,6 +43,14 @@ type TenantInviteItem struct {
 	Status      string `dynamodbav:"status"`
 	ExpiresAt   string `dynamodbav:"expiresAt"`
 	CreatedAt   string `dynamodbav:"createdAt"`
+}
+
+type TenantAPIKeyItem struct {
+	TenantID   string `dynamodbav:"tenantId"`
+	KeyID      string `dynamodbav:"keyId"`
+	APIKey     string `dynamodbav:"apiKey"`
+	CreatedAt  string `dynamodbav:"createdAt"`
+	LastUsedAt string `dynamodbav:"lastUsedAt,omitempty"`
 }
 
 func TenantScopedPK(tenantID, entityID string) string {

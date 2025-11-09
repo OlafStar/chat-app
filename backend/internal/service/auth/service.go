@@ -4,6 +4,7 @@ import (
 	"chat-app-backend/internal/database"
 	internaljwt "chat-app-backend/internal/jwt"
 	"chat-app-backend/internal/model"
+	"chat-app-backend/utils"
 	"context"
 	"errors"
 	"strings"
@@ -60,6 +61,14 @@ func (s *Service) Register(ctx context.Context, params RegisterParams) (AuthResu
 		return AuthResult{}, newError(ErrorCodeValidation, "missing required fields", nil)
 	}
 
+	existingUsers, err := s.repo.ListUsersByEmail(ctx, email)
+	if err != nil {
+		return AuthResult{}, newError(ErrorCodeInternal, "failed to check existing user", err)
+	}
+	if len(existingUsers) > 0 {
+		return AuthResult{}, newError(ErrorCodeValidation, "email already registered", nil)
+	}
+
 	plan := defaultPlan
 	seats := defaultPlanSeats
 
@@ -107,15 +116,27 @@ func (s *Service) Register(ctx context.Context, params RegisterParams) (AuthResu
 		return AuthResult{}, newError(ErrorCodeInternal, "failed to save user", err)
 	}
 
+	apiKeyItem := model.TenantAPIKeyItem{
+		TenantID:  tenantID,
+		KeyID:     uuid.NewString(),
+		APIKey:    utils.GenerateAPIKey(),
+		CreatedAt: now,
+	}
+
+	if err := s.repo.CreateTenantAPIKey(ctx, apiKeyItem); err != nil {
+		return AuthResult{}, newError(ErrorCodeInternal, "failed to create tenant api key", err)
+	}
+
 	tokens, err := createTokenWithRefresh(newUser, internaljwt.RoleUser, 0)
 	if err != nil {
 		return AuthResult{}, newError(ErrorCodeInternal, "failed to issue tokens", err)
 	}
 
 	return AuthResult{
-		User:   user,
-		Tenant: tenant,
-		Tokens: tokens,
+		User:    user,
+		Tenant:  tenant,
+		APIKeys: []model.TenantAPIKeyItem{apiKeyItem},
+		Tokens:  tokens,
 		Memberships: []Membership{
 			{
 				User:      user,

@@ -9,22 +9,19 @@ import (
 )
 
 func main() {
-	queue := queue.NewRequestQueueManager(10, 10)
+	queueManager := queue.NewRequestQueueManager(10, 10)
 	db, err := database.NewDatabase()
-
 	if err != nil {
 		log.Fatalf("db init failed: %v", err)
 	}
 
 	server := api.NewAPIServer(
-		":81",
-		queue,
+		":82",
+		queueManager,
 		db,
 		nil,
-		router.UtilsRoutes("/api/client/v1"),
-		router.AuthRoutes("/api/client/v1"),
-		router.TenantRoutes("/api/client/v1"),
-		router.ConversationTenantRoutes("/api/client/v1"),
+		router.UtilsRoutes("/api/public/v1"),
+		router.ConversationPublicRoutes("/api/public/v1"),
 	)
 
 	server.Run()

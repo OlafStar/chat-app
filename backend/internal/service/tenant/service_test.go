@@ -4,6 +4,8 @@ import (
 	internaljwt "chat-app-backend/internal/jwt"
 	"chat-app-backend/internal/model"
 	"context"
+	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -15,6 +17,7 @@ type memoryRepository struct {
 	users        map[string]model.UserItem
 	usersByEmail map[string]map[string]string
 	invites      map[string]model.TenantInviteItem
+	keys         map[string]map[string]model.TenantAPIKeyItem
 }
 
 func newMemoryRepository() *memoryRepository {
@@ -23,6 +26,7 @@ func newMemoryRepository() *memoryRepository {
 		users:        make(map[string]model.UserItem),
 		usersByEmail: make(map[string]map[string]string),
 		invites:      make(map[string]model.TenantInviteItem),
+		keys:         make(map[string]map[string]model.TenantAPIKeyItem),
 	}
 }
 
@@ -181,6 +185,55 @@ func (m *memoryRepository) DeleteInvite(ctx context.Context, token string) error
 	return nil
 }
 
+func (m *memoryRepository) ListTenantAPIKeys(ctx context.Context, tenantID string) ([]model.TenantAPIKeyItem, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	tenantKeys := m.keys[tenantID]
+	if tenantKeys == nil {
+		return []model.TenantAPIKeyItem{}, nil
+	}
+
+	keys := make([]model.TenantAPIKeyItem, 0, len(tenantKeys))
+	for _, key := range tenantKeys {
+		keys = append(keys, key)
+	}
+	return keys, nil
+}
+
+func (m *memoryRepository) CreateTenantAPIKey(ctx context.Context, item model.TenantAPIKeyItem) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if _, ok := m.keys[item.TenantID]; !ok {
+		m.keys[item.TenantID] = make(map[string]model.TenantAPIKeyItem)
+	}
+	m.keys[item.TenantID][item.KeyID] = item
+	return nil
+}
+
+func (m *memoryRepository) DeleteTenantAPIKey(ctx context.Context, tenantID, keyID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if tenantKeys, ok := m.keys[tenantID]; ok {
+		delete(tenantKeys, keyID)
+	}
+	return nil
+}
+
+func (m *memoryRepository) GetTenantAPIKey(ctx context.Context, tenantID, keyID string) (model.TenantAPIKeyItem, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if tenantKeys, ok := m.keys[tenantID]; ok {
+		if key, ok := tenantKeys[keyID]; ok {
+			return key, nil
+		}
+	}
+	return model.TenantAPIKeyItem{}, ErrNotFound
+}
+
 func fixedNow() time.Time {
 	return time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
 }
@@ -273,6 +326,172 @@ func TestUpdateTenantNameRequiresOwner(t *testing.T) {
 	svcErr, ok := err.(*Error)
 	if !ok || svcErr.Code != ErrorCodeForbidden {
 		t.Fatalf("expected forbidden error, got %v", err)
+	}
+}
+
+func TestListTenantAPIKeys(t *testing.T) {
+	repo := newMemoryRepository()
+	service := newService(repo)
+
+	tenant := model.TenantItem{
+		TenantID: "tenant-1",
+		Name:     "Tenant",
+		Plan:     "starter",
+		Seats:    1,
+		Created:  fixedNow().Format(time.RFC3339),
+	}
+	repo.tenants[tenant.TenantID] = tenant
+
+	owner := model.UserItem{
+		PK:           model.TenantScopedPK(tenant.TenantID, "owner-1"),
+		TenantID:     tenant.TenantID,
+		UserID:       "owner-1",
+		Email:        "owner@example.com",
+		Name:         "Owner",
+		Role:         "owner",
+		Status:       "active",
+		PasswordHash: "hash",
+		CreatedAt:    fixedNow().Format(time.RFC3339),
+	}
+	repo.CreateUser(context.Background(), owner)
+
+	repo.keys[tenant.TenantID] = map[string]model.TenantAPIKeyItem{
+		"key-1": {
+			TenantID:  tenant.TenantID,
+			KeyID:     "key-1",
+			APIKey:    "pingy_OLD",
+			CreatedAt: fixedNow().Add(-time.Hour).Format(time.RFC3339),
+		},
+		"key-2": {
+			TenantID:  tenant.TenantID,
+			KeyID:     "key-2",
+			APIKey:    "pingy_NEW",
+			CreatedAt: fixedNow().Format(time.RFC3339),
+		},
+	}
+
+	identity := Identity{
+		UserID:   owner.UserID,
+		TenantID: tenant.TenantID,
+		Email:    owner.Email,
+	}
+
+	keys, err := service.ListTenantAPIKeys(context.Background(), identity, tenant.TenantID)
+	if err != nil {
+		t.Fatalf("ListTenantAPIKeys error: %v", err)
+	}
+	if len(keys) != 2 {
+		t.Fatalf("expected 2 keys, got %d", len(keys))
+	}
+	if keys[0].APIKey != "pingy_NEW" {
+		t.Fatalf("expected newest key first, got %s", keys[0].APIKey)
+	}
+	if keys[1].APIKey != "pingy_OLD" {
+		t.Fatalf("expected oldest key second, got %s", keys[1].APIKey)
+	}
+}
+
+func TestCreateTenantAPIKey(t *testing.T) {
+	repo := newMemoryRepository()
+	service := newService(repo)
+
+	tenant := model.TenantItem{
+		TenantID: "tenant-1",
+		Name:     "Tenant",
+		Plan:     "starter",
+		Seats:    1,
+		Created:  fixedNow().Format(time.RFC3339),
+	}
+	repo.tenants[tenant.TenantID] = tenant
+
+	owner := model.UserItem{
+		PK:           model.TenantScopedPK(tenant.TenantID, "owner-1"),
+		TenantID:     tenant.TenantID,
+		UserID:       "owner-1",
+		Email:        "owner@example.com",
+		Name:         "Owner",
+		Role:         "owner",
+		Status:       "active",
+		PasswordHash: "hash",
+		CreatedAt:    fixedNow().Format(time.RFC3339),
+	}
+	repo.CreateUser(context.Background(), owner)
+
+	identity := Identity{
+		UserID:   owner.UserID,
+		TenantID: tenant.TenantID,
+		Email:    owner.Email,
+	}
+
+	key, err := service.CreateTenantAPIKey(context.Background(), identity, tenant.TenantID)
+	if err != nil {
+		t.Fatalf("CreateTenantAPIKey error: %v", err)
+	}
+	if key.APIKey == "" {
+		t.Fatalf("expected api key value")
+	}
+	if !strings.HasPrefix(key.APIKey, "pingy_") {
+		t.Fatalf("expected pingy_ prefix, got %s", key.APIKey)
+	}
+	if key.KeyID == "" {
+		t.Fatalf("expected key id")
+	}
+
+	stored, err := repo.GetTenantAPIKey(context.Background(), tenant.TenantID, key.KeyID)
+	if err != nil {
+		t.Fatalf("expected key stored: %v", err)
+	}
+	if stored.APIKey != key.APIKey {
+		t.Fatalf("expected stored api key to match, got %s", stored.APIKey)
+	}
+}
+
+func TestDeleteTenantAPIKey(t *testing.T) {
+	repo := newMemoryRepository()
+	service := newService(repo)
+
+	tenant := model.TenantItem{
+		TenantID: "tenant-1",
+		Name:     "Tenant",
+		Plan:     "starter",
+		Seats:    1,
+		Created:  fixedNow().Format(time.RFC3339),
+	}
+	repo.tenants[tenant.TenantID] = tenant
+
+	owner := model.UserItem{
+		PK:           model.TenantScopedPK(tenant.TenantID, "owner-1"),
+		TenantID:     tenant.TenantID,
+		UserID:       "owner-1",
+		Email:        "owner@example.com",
+		Name:         "Owner",
+		Role:         "owner",
+		Status:       "active",
+		PasswordHash: "hash",
+		CreatedAt:    fixedNow().Format(time.RFC3339),
+	}
+	repo.CreateUser(context.Background(), owner)
+
+	key := model.TenantAPIKeyItem{
+		TenantID:  tenant.TenantID,
+		KeyID:     "key-1",
+		APIKey:    "pingy_KEY",
+		CreatedAt: fixedNow().Format(time.RFC3339),
+	}
+	repo.CreateTenantAPIKey(context.Background(), key)
+
+	identity := Identity{
+		UserID:   owner.UserID,
+		TenantID: tenant.TenantID,
+		Email:    owner.Email,
+	}
+
+	if err := service.DeleteTenantAPIKey(context.Background(), identity, tenant.TenantID, key.KeyID); err != nil {
+		t.Fatalf("DeleteTenantAPIKey error: %v", err)
+	}
+
+	if _, err := repo.GetTenantAPIKey(context.Background(), tenant.TenantID, key.KeyID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected key to be removed, got %v", err)
 	}
 }
 

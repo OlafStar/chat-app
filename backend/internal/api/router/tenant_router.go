@@ -15,6 +15,7 @@ func TenantRoutes(prefix string) api.RouteRegistrar {
 
 		mux.HandleFunc(prefix+"/tenant", s.MakeHTTPHandleFunc(tenantEndpoints.UpdateTenant, middleware.ValidateUserJWT))
 		mux.HandleFunc(prefix+"/tenant/users", s.MakeHTTPHandleFunc(tenantEndpoints.AddTenantUser, middleware.ValidateUserJWT))
+		mux.HandleFunc(prefix+"/tenant/api-keys", s.MakeHTTPHandleFunc(tenantEndpoints.TenantAPIKeys, middleware.ValidateUserJWT))
 		mux.HandleFunc(prefix+"/tenant/invites/accept", s.MakeHTTPHandleFunc(tenantEndpoints.AcceptInvite))
 		mux.HandleFunc(prefix+"/tenant/invites/pending", s.MakeHTTPHandleFunc(tenantEndpoints.ListPendingInvites, middleware.ValidateUserJWT))
 	}

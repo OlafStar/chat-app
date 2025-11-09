@@ -43,6 +43,7 @@ func (c *DynamoDBClient) PutItem(
 	return nil
 }
 
+
 func (c *DynamoDBClient) GetItem(
 	ctx context.Context,
 	tableName string,

@@ -19,9 +19,9 @@ func WriteJSON(w http.ResponseWriter, status int, v any) error {
 
 func (s *APIServer) MakeHTTPHandleFunc(f apiFunc, authMiddleware ...middleware.Middleware) http.HandlerFunc {
 	corsConfig := middleware.CORSConfig{
-		AllowedOrigins:   []string{"http://localhost:3000", "https://heyholi.pl", "https://api.heyholi.pl", "https://new-kosmetolog.heyholi.pl"},
+		AllowedOrigins:   []string{"*"},
 		AllowedMethods:   []string{"GET", "POST", "PATCH", "PUT", "OPTIONS", "DELETE"},
-		AllowedHeaders:   []string{"Content-Type", "X-Requested-With", "Authorization"},
+		AllowedHeaders:   []string{"Content-Type", "X-Requested-With", "Authorization", "X-Tenant-Key", "X-Visitor-Token"},
 		AllowCredentials: true,
 	}
 

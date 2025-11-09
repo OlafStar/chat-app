@@ -5,27 +5,31 @@ import (
 	"chat-app-backend/internal/api/router"
 	"chat-app-backend/internal/database"
 	"chat-app-backend/internal/queue"
+	"chat-app-backend/internal/websocket"
 	"log"
 )
 
 func main() {
-	queue := queue.NewRequestQueueManager(10, 10)
+	queueManager := queue.NewRequestQueueManager(10, 10)
 	db, err := database.NewDatabase()
-
 	if err != nil {
 		log.Fatalf("db init failed: %v", err)
 	}
 
+	hub := websocket.NewHub()
+	go hub.Run()
+	handler := websocket.NewHandler(hub)
+
 	server := api.NewAPIServer(
-		":81",
-		queue,
+		":83",
+		queueManager,
 		db,
-		nil,
-		router.UtilsRoutes("/api/client/v1"),
-		router.AuthRoutes("/api/client/v1"),
-		router.TenantRoutes("/api/client/v1"),
-		router.ConversationTenantRoutes("/api/client/v1"),
+		handler,
+		router.UtilsRoutes("/api/ws/v1"),
+		router.ConversationWebsocketRoutes("/api/ws/v1"),
 	)
+
+	handler.SubscribeToRedisChannels()
 
 	server.Run()
 }

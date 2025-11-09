@@ -4,6 +4,7 @@ import (
 	"chat-app-backend/internal/database"
 	internaljwt "chat-app-backend/internal/jwt"
 	"chat-app-backend/internal/model"
+	"chat-app-backend/utils"
 	"context"
 	"errors"
 	"fmt"
@@ -76,6 +77,12 @@ type AddUserParams struct {
 type TenantResult struct {
 	Tenant         model.TenantItem
 	RemainingSeats int
+}
+
+type TenantAPIKey struct {
+	KeyID     string
+	APIKey    string
+	CreatedAt time.Time
 }
 
 type InviteResult struct {
@@ -184,6 +191,109 @@ func (s *Service) UpdateTenantName(ctx context.Context, identity Identity, tenan
 	return TenantResult{
 		Tenant:         updated,
 		RemainingSeats: remaining,
+	}, nil
+}
+
+func (s *Service) ListTenantAPIKeys(ctx context.Context, identity Identity, tenantID string) ([]TenantAPIKey, error) {
+	tenantID = strings.TrimSpace(tenantID)
+	if tenantID == "" {
+		tenantID = strings.TrimSpace(identity.TenantID)
+	}
+
+	_, tenant, err := s.ensureOwnerAccess(ctx, identity, tenantID)
+	if err != nil {
+		return nil, err
+	}
+
+	items, err := s.repo.ListTenantAPIKeys(ctx, tenant.TenantID)
+	if err != nil {
+		return nil, newError(ErrorCodeInternal, "failed to list tenant api keys", err)
+	}
+
+	keys := make([]TenantAPIKey, 0, len(items))
+	for _, item := range items {
+		key, err := toTenantAPIKey(item)
+		if err != nil {
+			return nil, newError(ErrorCodeInternal, "invalid api key record", err)
+		}
+		keys = append(keys, key)
+	}
+
+	sort.Slice(keys, func(i, j int) bool {
+		return keys[i].CreatedAt.After(keys[j].CreatedAt)
+	})
+
+	return keys, nil
+}
+
+func (s *Service) CreateTenantAPIKey(ctx context.Context, identity Identity, tenantID string) (TenantAPIKey, error) {
+	tenantID = strings.TrimSpace(tenantID)
+	if tenantID == "" {
+		tenantID = strings.TrimSpace(identity.TenantID)
+	}
+
+	_, tenant, err := s.ensureOwnerAccess(ctx, identity, tenantID)
+	if err != nil {
+		return TenantAPIKey{}, err
+	}
+
+	now := s.now().UTC()
+	item := model.TenantAPIKeyItem{
+		TenantID:  tenant.TenantID,
+		KeyID:     uuid.NewString(),
+		APIKey:    utils.GenerateAPIKey(),
+		CreatedAt: now.Format(time.RFC3339),
+	}
+
+	if err := s.repo.CreateTenantAPIKey(ctx, item); err != nil {
+		return TenantAPIKey{}, newError(ErrorCodeInternal, "failed to create tenant api key", err)
+	}
+
+	key, err := toTenantAPIKey(item)
+	if err != nil {
+		return TenantAPIKey{}, newError(ErrorCodeInternal, "failed to prepare api key response", err)
+	}
+
+	return key, nil
+}
+
+func (s *Service) DeleteTenantAPIKey(ctx context.Context, identity Identity, tenantID, keyID string) error {
+	tenantID = strings.TrimSpace(tenantID)
+	if tenantID == "" {
+		tenantID = strings.TrimSpace(identity.TenantID)
+	}
+	keyID = strings.TrimSpace(keyID)
+	if keyID == "" {
+		return newError(ErrorCodeValidation, "keyId is required", nil)
+	}
+
+	_, tenant, err := s.ensureOwnerAccess(ctx, identity, tenantID)
+	if err != nil {
+		return err
+	}
+
+	if _, err := s.repo.GetTenantAPIKey(ctx, tenant.TenantID, keyID); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return newError(ErrorCodeNotFound, "api key not found", err)
+		}
+		return newError(ErrorCodeInternal, "failed to load api key", err)
+	}
+
+	if err := s.repo.DeleteTenantAPIKey(ctx, tenant.TenantID, keyID); err != nil {
+		return newError(ErrorCodeInternal, "failed to delete api key", err)
+	}
+	return nil
+}
+
+func toTenantAPIKey(item model.TenantAPIKeyItem) (TenantAPIKey, error) {
+	createdAt, err := time.Parse(time.RFC3339, item.CreatedAt)
+	if err != nil {
+		return TenantAPIKey{}, err
+	}
+	return TenantAPIKey{
+		KeyID:     item.KeyID,
+		APIKey:    item.APIKey,
+		CreatedAt: createdAt,
 	}, nil
 }
 

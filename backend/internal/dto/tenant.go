@@ -48,3 +48,21 @@ type PendingInviteResponse struct {
 type ListPendingInvitesResponse struct {
 	Invites []PendingInviteResponse `json:"invites"`
 }
+
+type TenantAPIKey struct {
+	KeyID     string `json:"keyId"`
+	APIKey    string `json:"apiKey"`
+	CreatedAt string `json:"createdAt"`
+}
+
+type TenantAPIKeyListResponse struct {
+	Keys []TenantAPIKey `json:"keys"`
+}
+
+type CreateTenantAPIKeyResponse struct {
+	Key TenantAPIKey `json:"key"`
+}
+
+type DeleteTenantAPIKeyRequest struct {
+	KeyID string `json:"keyId"`
+}

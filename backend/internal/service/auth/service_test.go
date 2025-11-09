@@ -4,6 +4,7 @@ import (
 	internaljwt "chat-app-backend/internal/jwt"
 	"chat-app-backend/internal/model"
 	"context"
+	"sort"
 	"sync"
 	"testing"
 	"time"
@@ -14,6 +15,7 @@ type memoryRepository struct {
 	tenants      map[string]model.TenantItem
 	users        map[string]model.UserItem
 	usersByEmail map[string]map[string]string
+	keys         map[string]map[string]model.TenantAPIKeyItem
 }
 
 func newMemoryRepository() *memoryRepository {
@@ -21,6 +23,7 @@ func newMemoryRepository() *memoryRepository {
 		tenants:      make(map[string]model.TenantItem),
 		users:        make(map[string]model.UserItem),
 		usersByEmail: make(map[string]map[string]string),
+		keys:         make(map[string]map[string]model.TenantAPIKeyItem),
 	}
 }
 
@@ -72,6 +75,9 @@ func (m *memoryRepository) ListUsersByEmail(ctx context.Context, email string) (
 			users = append(users, user)
 		}
 	}
+	sort.Slice(users, func(i, j int) bool {
+		return users[i].TenantID < users[j].TenantID
+	})
 	return users, nil
 }
 
@@ -95,6 +101,33 @@ func (m *memoryRepository) GetUser(ctx context.Context, tenantID, userID string)
 		return model.UserItem{}, ErrNotFound
 	}
 	return user, nil
+}
+
+func (m *memoryRepository) CreateTenantAPIKey(ctx context.Context, item model.TenantAPIKeyItem) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if _, ok := m.keys[item.TenantID]; !ok {
+		m.keys[item.TenantID] = make(map[string]model.TenantAPIKeyItem)
+	}
+	m.keys[item.TenantID][item.KeyID] = item
+	return nil
+}
+
+func (m *memoryRepository) ListTenantAPIKeys(ctx context.Context, tenantID string) ([]model.TenantAPIKeyItem, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	tenantKeys := m.keys[tenantID]
+	if tenantKeys == nil {
+		return []model.TenantAPIKeyItem{}, nil
+	}
+
+	out := make([]model.TenantAPIKeyItem, 0, len(tenantKeys))
+	for _, key := range tenantKeys {
+		out = append(out, key)
+	}
+	return out, nil
 }
 
 func setupJWT(t *testing.T) {
@@ -121,6 +154,37 @@ func fixedNow() time.Time {
 	return time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
 }
 
+func addTenantMembership(t *testing.T, repo *memoryRepository, tenantID, tenantName, email, passwordHash, role string) {
+	t.Helper()
+
+	tenant := model.TenantItem{
+		TenantID: tenantID,
+		Name:     tenantName,
+		Plan:     defaultPlan,
+		Seats:    defaultPlanSeats,
+		Settings: map[string]interface{}{},
+		Created:  fixedNow().Format(time.RFC3339),
+	}
+	if err := repo.CreateTenant(context.Background(), tenant); err != nil {
+		t.Fatalf("create tenant: %v", err)
+	}
+
+	user := model.UserItem{
+		PK:           model.TenantScopedPK(tenantID, tenantID+"-user"),
+		TenantID:     tenantID,
+		UserID:       tenantID + "-user",
+		Email:        email,
+		Name:         tenantName + " Member",
+		Role:         role,
+		Status:       "active",
+		PasswordHash: passwordHash,
+		CreatedAt:    fixedNow().Format(time.RFC3339),
+	}
+	if err := repo.CreateUser(context.Background(), user); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+}
+
 func TestRegisterUsesDefaultPlanAndSeats(t *testing.T) {
 	setupJWT(t)
 	repo := newMemoryRepository()
@@ -143,6 +207,16 @@ func TestRegisterUsesDefaultPlanAndSeats(t *testing.T) {
 
 	if result.Tenant.Seats != defaultPlanSeats {
 		t.Fatalf("expected seats %d, got %d", defaultPlanSeats, result.Tenant.Seats)
+	}
+
+	if len(result.APIKeys) != 1 {
+		t.Fatalf("expected single api key, got %d", len(result.APIKeys))
+	}
+	if result.APIKeys[0].APIKey == "" {
+		t.Fatal("expected generated api key")
+	}
+	if len(repo.keys[result.Tenant.TenantID]) != 1 {
+		t.Fatalf("expected key stored for tenant, got %d", len(repo.keys[result.Tenant.TenantID]))
 	}
 
 	if len(result.Memberships) != 1 || !result.Memberships[0].IsDefault {
@@ -171,6 +245,39 @@ func TestRegisterValidatesRequiredFields(t *testing.T) {
 		t.Fatalf("expected service error, got %T", err)
 	}
 
+	if svcErr.Code != ErrorCodeValidation {
+		t.Fatalf("expected validation error, got %s", svcErr.Code)
+	}
+}
+
+func TestRegisterRejectsDuplicateEmail(t *testing.T) {
+	setupJWT(t)
+	repo := newMemoryRepository()
+	svc := NewWithRepository(repo, fixedNow)
+
+	_, err := svc.Register(context.Background(), RegisterParams{
+		TenantName: "Acme",
+		OwnerName:  "Owner",
+		OwnerEmail: "owner@example.com",
+		Password:   "secret",
+	})
+	if err != nil {
+		t.Fatalf("register error: %v", err)
+	}
+
+	_, err = svc.Register(context.Background(), RegisterParams{
+		TenantName: "Beta",
+		OwnerName:  "Owner",
+		OwnerEmail: "owner@example.com",
+		Password:   "secret",
+	})
+	if err == nil {
+		t.Fatal("expected duplicate email to be rejected")
+	}
+	svcErr, ok := err.(*Error)
+	if !ok {
+		t.Fatalf("expected service error, got %T", err)
+	}
 	if svcErr.Code != ErrorCodeValidation {
 		t.Fatalf("expected validation error, got %s", svcErr.Code)
 	}
@@ -213,7 +320,7 @@ func TestLoginWithoutTenantSelectsDefaultWhenMultiple(t *testing.T) {
 	repo := newMemoryRepository()
 	svc := NewWithRepository(repo, fixedNow)
 
-	_, err := svc.Register(context.Background(), RegisterParams{
+	first, err := svc.Register(context.Background(), RegisterParams{
 		TenantName: "Acme",
 		OwnerName:  "Owner",
 		OwnerEmail: "owner@example.com",
@@ -223,15 +330,7 @@ func TestLoginWithoutTenantSelectsDefaultWhenMultiple(t *testing.T) {
 		t.Fatalf("register error: %v", err)
 	}
 
-	_, err = svc.Register(context.Background(), RegisterParams{
-		TenantName: "Beta",
-		OwnerName:  "Owner Two",
-		OwnerEmail: "owner@example.com",
-		Password:   "secret",
-	})
-	if err != nil {
-		t.Fatalf("second register error: %v", err)
-	}
+	addTenantMembership(t, repo, "tenant-beta", "Beta", first.User.Email, first.User.PasswordHash, "member")
 
 	loginResult, err := svc.Login(context.Background(), LoginParams{
 		Email:    "owner@example.com",
@@ -271,15 +370,8 @@ func TestSwitchTenantChangesDefault(t *testing.T) {
 		t.Fatalf("register error: %v", err)
 	}
 
-	second, err := svc.Register(context.Background(), RegisterParams{
-		TenantName: "Beta",
-		OwnerName:  "Owner",
-		OwnerEmail: "owner@example.com",
-		Password:   "secret",
-	})
-	if err != nil {
-		t.Fatalf("second register error: %v", err)
-	}
+	secondTenantID := "tenant-beta"
+	addTenantMembership(t, repo, secondTenantID, "Beta", first.User.Email, first.User.PasswordHash, "member")
 
 	loginResult, err := svc.Login(context.Background(), LoginParams{
 		Email:    "owner@example.com",
@@ -300,7 +392,7 @@ func TestSwitchTenantChangesDefault(t *testing.T) {
 
 	var target Membership
 	for _, member := range loginResult.Memberships {
-		if member.Tenant.TenantID == second.Tenant.TenantID {
+		if member.Tenant.TenantID == secondTenantID {
 			target = member
 			break
 		}

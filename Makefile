@@ -2,8 +2,8 @@ COMPOSE ?= docker compose
 PROJECT ?= chat-app
 SERVICES ?=
 
-BACKEND_SERVICES := client-server proxy-server
-FRONTEND_SERVICES := frontend
+BACKEND_SERVICES := client-server public-server proxy-server websocket-server-1 websocket-server-2 websocket-server-3
+FRONTEND_SERVICES := frontend widget-server
 DATA_SERVICES := dynamodb redis
 
 TEST_ARGS ?=

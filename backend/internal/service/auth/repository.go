@@ -21,6 +21,8 @@ type Repository interface {
 	ListUsersByEmail(ctx context.Context, email string) ([]model.UserItem, error)
 	GetTenant(ctx context.Context, tenantID string) (model.TenantItem, error)
 	GetUser(ctx context.Context, tenantID, userID string) (model.UserItem, error)
+	CreateTenantAPIKey(ctx context.Context, item model.TenantAPIKeyItem) error
+	ListTenantAPIKeys(ctx context.Context, tenantID string) ([]model.TenantAPIKeyItem, error)
 }
 
 type DynamoRepository struct {
@@ -134,6 +136,38 @@ func (r *DynamoRepository) GetUser(ctx context.Context, tenantID, userID string)
 	}
 
 	return user, nil
+}
+
+func (r *DynamoRepository) CreateTenantAPIKey(ctx context.Context, item model.TenantAPIKeyItem) error {
+	return r.db.Client.PutItem(ctx, model.TenantAPIKeysTable, item)
+}
+
+func (r *DynamoRepository) ListTenantAPIKeys(ctx context.Context, tenantID string) ([]model.TenantAPIKeyItem, error) {
+	items, err := r.db.Client.QueryItems(
+		ctx,
+		model.TenantAPIKeysTable,
+		nil,
+		"tenantId = :tenantId",
+		map[string]types.AttributeValue{
+			":tenantId": &types.AttributeValueMemberS{Value: tenantID},
+		},
+		nil,
+		nil,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	keys := make([]model.TenantAPIKeyItem, 0, len(items))
+	for _, item := range items {
+		var key model.TenantAPIKeyItem
+		if err := attributevalue.UnmarshalMap(item, &key); err != nil {
+			return nil, err
+		}
+		keys = append(keys, key)
+	}
+
+	return keys, nil
 }
 
 func isNotFoundError(err error) bool {

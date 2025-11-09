@@ -14,6 +14,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"sync"
 	"testing"
 	"time"
@@ -24,6 +25,7 @@ type testRepository struct {
 	tenants      map[string]model.TenantItem
 	users        map[string]model.UserItem
 	usersByEmail map[string]map[string]string
+	keys         map[string]map[string]model.TenantAPIKeyItem
 }
 
 func newTestRepository() *testRepository {
@@ -31,6 +33,7 @@ func newTestRepository() *testRepository {
 		tenants:      make(map[string]model.TenantItem),
 		users:        make(map[string]model.UserItem),
 		usersByEmail: make(map[string]map[string]string),
+		keys:         make(map[string]map[string]model.TenantAPIKeyItem),
 	}
 }
 
@@ -82,6 +85,9 @@ func (m *testRepository) ListUsersByEmail(ctx context.Context, email string) ([]
 			users = append(users, user)
 		}
 	}
+	sort.Slice(users, func(i, j int) bool {
+		return users[i].TenantID < users[j].TenantID
+	})
 	return users, nil
 }
 
@@ -104,6 +110,33 @@ func (m *testRepository) GetUser(ctx context.Context, tenantID, userID string) (
 		return model.UserItem{}, authsvc.ErrNotFound
 	}
 	return user, nil
+}
+
+func (m *testRepository) CreateTenantAPIKey(ctx context.Context, item model.TenantAPIKeyItem) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if _, ok := m.keys[item.TenantID]; !ok {
+		m.keys[item.TenantID] = make(map[string]model.TenantAPIKeyItem)
+	}
+	m.keys[item.TenantID][item.KeyID] = item
+	return nil
+}
+
+func (m *testRepository) ListTenantAPIKeys(ctx context.Context, tenantID string) ([]model.TenantAPIKeyItem, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	tenantKeys := m.keys[tenantID]
+	if tenantKeys == nil {
+		return []model.TenantAPIKeyItem{}, nil
+	}
+
+	keys := make([]model.TenantAPIKeyItem, 0, len(tenantKeys))
+	for _, key := range tenantKeys {
+		keys = append(keys, key)
+	}
+	return keys, nil
 }
 
 func fixedTime() time.Time {
@@ -144,6 +177,50 @@ func setupAuthHandler(t *testing.T, svc *authsvc.Service) (http.Handler, func())
 
 	return mux, func() {
 		queueManager.Shutdown()
+	}
+}
+
+func getPasswordHashForEmail(t *testing.T, repo *testRepository, email string) string {
+	t.Helper()
+
+	users, err := repo.ListUsersByEmail(context.Background(), email)
+	if err != nil {
+		t.Fatalf("list users by email: %v", err)
+	}
+	if len(users) == 0 {
+		t.Fatalf("no users found for email %s", email)
+	}
+	return users[0].PasswordHash
+}
+
+func addTestTenantMembership(t *testing.T, repo *testRepository, tenantID, tenantName, email, passwordHash, role string) {
+	t.Helper()
+
+	tenant := model.TenantItem{
+		TenantID: tenantID,
+		Name:     tenantName,
+		Plan:     "starter",
+		Seats:    1,
+		Settings: map[string]interface{}{},
+		Created:  fixedTime().Format(time.RFC3339),
+	}
+	if err := repo.CreateTenant(context.Background(), tenant); err != nil {
+		t.Fatalf("create tenant: %v", err)
+	}
+
+	user := model.UserItem{
+		PK:           model.TenantScopedPK(tenantID, tenantID+"-user"),
+		TenantID:     tenantID,
+		UserID:       tenantID + "-user",
+		Email:        email,
+		Name:         tenantName + " Member",
+		Role:         role,
+		Status:       "active",
+		PasswordHash: passwordHash,
+		CreatedAt:    fixedTime().Format(time.RFC3339),
+	}
+	if err := repo.CreateUser(context.Background(), user); err != nil {
+		t.Fatalf("create user: %v", err)
 	}
 }
 
@@ -211,6 +288,12 @@ func TestAuthEndpointsEndToEnd(t *testing.T) {
 	if registerResp.Tenant.Seats != 1 {
 		t.Fatalf("expected seats 1, got %d", registerResp.Tenant.Seats)
 	}
+	if len(registerResp.APIKeys) != 1 {
+		t.Fatalf("expected single api key in response, got %d", len(registerResp.APIKeys))
+	}
+	if registerResp.APIKeys[0].APIKey == "" {
+		t.Fatal("expected api key value in response")
+	}
 
 	if len(registerResp.Tenants) != 1 || !registerResp.Tenants[0].IsDefault {
 		t.Fatalf("expected single default membership, got %#v", registerResp.Tenants)
@@ -273,9 +356,35 @@ func TestAuthRegisterUsesDefaultSeatsWhenProvided(t *testing.T) {
 	if resp.Tenant.Plan != "starter" {
 		t.Fatalf("expected plan starter, got %s", resp.Tenant.Plan)
 	}
+	if len(resp.APIKeys) != 1 {
+		t.Fatalf("expected single api key in response, got %d", len(resp.APIKeys))
+	}
 
 	if len(resp.Tenants) != 1 || !resp.Tenants[0].IsDefault {
 		t.Fatalf("expected single default membership, got %#v", resp.Tenants)
+	}
+}
+
+func TestAuthRegisterRejectsDuplicateEmail(t *testing.T) {
+	setupTestJWT(t)
+	repo := newTestRepository()
+	service := authsvc.NewWithRepository(repo, fixedTime)
+
+	handler, cleanup := setupAuthHandler(t, service)
+	defer cleanup()
+
+	payload := map[string]interface{}{
+		"tenantName": "Acme Corp",
+		"name":       "Jane Owner",
+		"email":      "owner@example.com",
+		"password":   "Sup3rS3cret!",
+	}
+
+	doJSONRequest[dto.AuthResponse](t, handler, http.MethodPost, "/api/auth/register", payload, nil, http.StatusCreated)
+
+	errResp := doJSONRequest[api.ApiError](t, handler, http.MethodPost, "/api/auth/register", payload, nil, http.StatusBadRequest)
+	if errResp.Error == "" {
+		t.Fatal("expected error message for duplicate registration")
 	}
 }
 
@@ -296,14 +405,8 @@ func TestAuthLoginListsMultipleTenants(t *testing.T) {
 
 	doJSONRequest[dto.AuthResponse](t, handler, http.MethodPost, "/api/auth/register", basePayload, nil, http.StatusCreated)
 
-	secondPayload := map[string]interface{}{
-		"tenantName": "Beta Corp",
-		"name":       "Jane Owner",
-		"email":      "owner@example.com",
-		"password":   "Sup3rS3cret!",
-	}
-
-	doJSONRequest[dto.AuthResponse](t, handler, http.MethodPost, "/api/auth/register", secondPayload, nil, http.StatusCreated)
+	passwordHash := getPasswordHashForEmail(t, repo, "owner@example.com")
+	addTestTenantMembership(t, repo, "tenant-beta", "Beta Corp", "owner@example.com", passwordHash, "member")
 
 	loginPayload := map[string]interface{}{
 		"email":    "owner@example.com",
@@ -344,14 +447,9 @@ func TestAuthSwitchTenant(t *testing.T) {
 
 	firstResp := doJSONRequest[dto.AuthResponse](t, handler, http.MethodPost, "/api/auth/register", firstPayload, nil, http.StatusCreated)
 
-	secondPayload := map[string]interface{}{
-		"tenantName": "Beta Corp",
-		"name":       "Jane Owner",
-		"email":      "owner@example.com",
-		"password":   "Sup3rS3cret!",
-	}
-
-	doJSONRequest[dto.AuthResponse](t, handler, http.MethodPost, "/api/auth/register", secondPayload, nil, http.StatusCreated)
+	passwordHash := getPasswordHashForEmail(t, repo, "owner@example.com")
+	secondTenantID := "tenant-beta"
+	addTestTenantMembership(t, repo, secondTenantID, "Beta Corp", "owner@example.com", passwordHash, "member")
 
 	loginResp := doJSONRequest[dto.AuthResponse](t, handler, http.MethodPost, "/api/auth/login", map[string]interface{}{
 		"email":    "owner@example.com",
@@ -364,7 +462,7 @@ func TestAuthSwitchTenant(t *testing.T) {
 
 	var target dto.TenantMembership
 	for _, membership := range loginResp.Tenants {
-		if membership.TenantID != firstResp.Tenant.TenantID {
+		if membership.TenantID == secondTenantID {
 			target = membership
 			break
 		}

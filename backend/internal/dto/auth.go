@@ -44,6 +44,7 @@ type AuthResponse struct {
 	RefreshToken string             `json:"refreshToken,omitempty"`
 	User         UserResponse       `json:"user"`
 	Tenant       TenantResponse     `json:"tenant"`
+	APIKeys      []TenantAPIKey     `json:"apiKeys,omitempty"`
 	Tenants      []TenantMembership `json:"tenants,omitempty"`
 }
 

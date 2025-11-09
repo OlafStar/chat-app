@@ -190,6 +190,10 @@ func toAuthResponse(result authsvc.AuthResult) dto.AuthResponse {
 		Tenant:       toTenantResponse(result.Tenant),
 	}
 
+	if len(result.APIKeys) > 0 {
+		resp.APIKeys = toAuthAPIKeys(result.APIKeys)
+	}
+
 	if len(result.Memberships) > 0 {
 		resp.Tenants = toTenantMemberships(result.Memberships)
 	}
@@ -229,6 +233,18 @@ func toTenantResponseWithRemaining(tenant model.TenantItem, remaining *int) dto.
 		CreatedAt:      tenant.Created,
 		RemainingSeats: remaining,
 	}
+}
+
+func toAuthAPIKeys(items []model.TenantAPIKeyItem) []dto.TenantAPIKey {
+	resp := make([]dto.TenantAPIKey, 0, len(items))
+	for _, item := range items {
+		resp = append(resp, dto.TenantAPIKey{
+			KeyID:     item.KeyID,
+			APIKey:    item.APIKey,
+			CreatedAt: item.CreatedAt,
+		})
+	}
+	return resp
 }
 
 func toTenantMemberships(memberships []authsvc.Membership) []dto.TenantMembership {

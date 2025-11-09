@@ -130,6 +130,24 @@ func (h *Handler) GetRooms(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(rooms)
 }
 
+func (h *Handler) NotifyRoom(roomID string, payload interface{}) {
+	if h == nil || h.hub == nil {
+		return
+	}
+
+	messageJSON, err := json.Marshal(payload)
+	if err != nil {
+		log.Printf("failed to marshal websocket payload for room %s: %v", roomID, err)
+		return
+	}
+
+	h.hub.Broadcast <- &WSMessage{
+		Content:   string(messageJSON),
+		RoomID:    roomID,
+		Timestamp: time.Now().Unix(),
+	}
+}
+
 // func (h *Handler) Notify(createdMessage *dto.ChatMessageWithUserClientDTO, websocketRoomId string) {
 // 	messageJSON, err := json.Marshal(createdMessage)
 // 	if err != nil {

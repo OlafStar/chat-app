@@ -11,8 +11,10 @@ import (
 	tenantservice "chat-app-backend/internal/service/tenant"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -24,6 +26,7 @@ type tenantTestRepository struct {
 	users        map[string]model.UserItem
 	usersByEmail map[string]map[string]string
 	invites      map[string]model.TenantInviteItem
+	keys         map[string]map[string]model.TenantAPIKeyItem
 }
 
 func newTenantTestRepository() *tenantTestRepository {
@@ -32,6 +35,7 @@ func newTenantTestRepository() *tenantTestRepository {
 		users:        make(map[string]model.UserItem),
 		usersByEmail: make(map[string]map[string]string),
 		invites:      make(map[string]model.TenantInviteItem),
+		keys:         make(map[string]map[string]model.TenantAPIKeyItem),
 	}
 }
 
@@ -181,6 +185,55 @@ func (m *tenantTestRepository) DeleteInvite(ctx context.Context, token string) e
 	return nil
 }
 
+func (m *tenantTestRepository) ListTenantAPIKeys(ctx context.Context, tenantID string) ([]model.TenantAPIKeyItem, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	tenantKeys := m.keys[tenantID]
+	if tenantKeys == nil {
+		return []model.TenantAPIKeyItem{}, nil
+	}
+
+	keys := make([]model.TenantAPIKeyItem, 0, len(tenantKeys))
+	for _, key := range tenantKeys {
+		keys = append(keys, key)
+	}
+	return keys, nil
+}
+
+func (m *tenantTestRepository) CreateTenantAPIKey(ctx context.Context, item model.TenantAPIKeyItem) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if _, ok := m.keys[item.TenantID]; !ok {
+		m.keys[item.TenantID] = make(map[string]model.TenantAPIKeyItem)
+	}
+	m.keys[item.TenantID][item.KeyID] = item
+	return nil
+}
+
+func (m *tenantTestRepository) DeleteTenantAPIKey(ctx context.Context, tenantID, keyID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if tenantKeys, ok := m.keys[tenantID]; ok {
+		delete(tenantKeys, keyID)
+	}
+	return nil
+}
+
+func (m *tenantTestRepository) GetTenantAPIKey(ctx context.Context, tenantID, keyID string) (model.TenantAPIKeyItem, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if tenantKeys, ok := m.keys[tenantID]; ok {
+		if key, ok := tenantKeys[keyID]; ok {
+			return key, nil
+		}
+	}
+	return model.TenantAPIKeyItem{}, tenantservice.ErrNotFound
+}
+
 func tenantFixedTime() time.Time {
 	return time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
 }
@@ -199,6 +252,7 @@ func setupTenantHandler(t *testing.T, repo tenantservice.Repository) (http.Handl
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/tenant", server.MakeHTTPHandleFunc(tenantEndpoints.UpdateTenant, middleware.ValidateUserJWT))
 	mux.HandleFunc("/api/tenant/users", server.MakeHTTPHandleFunc(tenantEndpoints.AddTenantUser, middleware.ValidateUserJWT))
+	mux.HandleFunc("/api/tenant/api-keys", server.MakeHTTPHandleFunc(tenantEndpoints.TenantAPIKeys, middleware.ValidateUserJWT))
 	mux.HandleFunc("/api/tenant/invites/accept", server.MakeHTTPHandleFunc(tenantEndpoints.AcceptInvite))
 	mux.HandleFunc("/api/tenant/invites/pending", server.MakeHTTPHandleFunc(tenantEndpoints.ListPendingInvites, middleware.ValidateUserJWT))
 
@@ -272,6 +326,177 @@ func TestTenantUpdateNameEndpoint(t *testing.T) {
 	}
 	if resp.RemainingSeats == nil || *resp.RemainingSeats != 1 {
 		t.Fatalf("expected remaining seats 1, got %v", resp.RemainingSeats)
+	}
+}
+
+func TestTenantListAPIKeysEndpoint(t *testing.T) {
+	repo := newTenantTestRepository()
+
+	tenant := model.TenantItem{
+		TenantID: "tenant-1",
+		Name:     "Tenant",
+		Plan:     "starter",
+		Seats:    1,
+		Created:  tenantFixedTime().Format(time.RFC3339),
+	}
+	repo.tenants[tenant.TenantID] = tenant
+
+	owner := model.UserItem{
+		PK:           model.TenantScopedPK(tenant.TenantID, "owner-1"),
+		TenantID:     tenant.TenantID,
+		UserID:       "owner-1",
+		Email:        "owner@example.com",
+		Name:         "Owner",
+		Role:         "owner",
+		Status:       "active",
+		PasswordHash: "hash",
+		CreatedAt:    tenantFixedTime().Format(time.RFC3339),
+	}
+	repo.CreateUser(context.Background(), owner)
+
+	repo.keys[tenant.TenantID] = map[string]model.TenantAPIKeyItem{
+		"key-1": {
+			TenantID:  tenant.TenantID,
+			KeyID:     "key-1",
+			APIKey:    "pingy_ONE",
+			CreatedAt: tenantFixedTime().Add(-time.Hour).Format(time.RFC3339),
+		},
+		"key-2": {
+			TenantID:  tenant.TenantID,
+			KeyID:     "key-2",
+			APIKey:    "pingy_TWO",
+			CreatedAt: tenantFixedTime().Format(time.RFC3339),
+		},
+	}
+
+	handler, cleanup := setupTenantHandler(t, repo)
+	defer cleanup()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/tenant/api-keys", nil)
+	req.Header.Set("Authorization", bearer(t, owner))
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp dto.TenantAPIKeyListResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp.Keys) != 2 {
+		t.Fatalf("expected 2 keys, got %d", len(resp.Keys))
+	}
+	if resp.Keys[0].APIKey != "pingy_TWO" {
+		t.Fatalf("expected newest key first, got %s", resp.Keys[0].APIKey)
+	}
+}
+
+func TestTenantCreateAPIKeyEndpoint(t *testing.T) {
+	repo := newTenantTestRepository()
+
+	tenant := model.TenantItem{
+		TenantID: "tenant-1",
+		Name:     "Tenant",
+		Plan:     "starter",
+		Seats:    1,
+		Created:  tenantFixedTime().Format(time.RFC3339),
+	}
+	repo.tenants[tenant.TenantID] = tenant
+
+	owner := model.UserItem{
+		PK:           model.TenantScopedPK(tenant.TenantID, "owner-1"),
+		TenantID:     tenant.TenantID,
+		UserID:       "owner-1",
+		Email:        "owner@example.com",
+		Name:         "Owner",
+		Role:         "owner",
+		Status:       "active",
+		PasswordHash: "hash",
+		CreatedAt:    tenantFixedTime().Format(time.RFC3339),
+	}
+	repo.CreateUser(context.Background(), owner)
+
+	handler, cleanup := setupTenantHandler(t, repo)
+	defer cleanup()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/tenant/api-keys", nil)
+	req.Header.Set("Authorization", bearer(t, owner))
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected status 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp dto.CreateTenantAPIKeyResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Key.APIKey == "" {
+		t.Fatalf("expected api key")
+	}
+	if resp.Key.KeyID == "" {
+		t.Fatalf("expected key id")
+	}
+	if !strings.HasPrefix(resp.Key.APIKey, "pingy_") {
+		t.Fatalf("expected api key prefix, got %s", resp.Key.APIKey)
+	}
+}
+
+func TestTenantDeleteAPIKeyEndpoint(t *testing.T) {
+	repo := newTenantTestRepository()
+
+	tenant := model.TenantItem{
+		TenantID: "tenant-1",
+		Name:     "Tenant",
+		Plan:     "starter",
+		Seats:    1,
+		Created:  tenantFixedTime().Format(time.RFC3339),
+	}
+	repo.tenants[tenant.TenantID] = tenant
+
+	owner := model.UserItem{
+		PK:           model.TenantScopedPK(tenant.TenantID, "owner-1"),
+		TenantID:     tenant.TenantID,
+		UserID:       "owner-1",
+		Email:        "owner@example.com",
+		Name:         "Owner",
+		Role:         "owner",
+		Status:       "active",
+		PasswordHash: "hash",
+		CreatedAt:    tenantFixedTime().Format(time.RFC3339),
+	}
+	repo.CreateUser(context.Background(), owner)
+
+	repo.CreateTenantAPIKey(context.Background(), model.TenantAPIKeyItem{
+		TenantID:  tenant.TenantID,
+		KeyID:     "key-1",
+		APIKey:    "pingy_KEY",
+		CreatedAt: tenantFixedTime().Format(time.RFC3339),
+	})
+
+	handler, cleanup := setupTenantHandler(t, repo)
+	defer cleanup()
+
+	payload := dto.DeleteTenantAPIKeyRequest{KeyID: "key-1"}
+	body, _ := json.Marshal(payload)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/tenant/api-keys", bytes.NewReader(body))
+	req.Header.Set("Authorization", bearer(t, owner))
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected status 204, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	if _, err := repo.GetTenantAPIKey(context.Background(), tenant.TenantID, "key-1"); !errors.Is(err, tenantservice.ErrNotFound) {
+		t.Fatalf("expected key to be removed, got %v", err)
 	}
 }
 

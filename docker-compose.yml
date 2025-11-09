@@ -78,8 +78,90 @@ services:
       dockerfile: cmd/proxy-server/Dockerfile
     depends_on:
       - client-server
+      - public-server
+      - websocket-server-1
+      - websocket-server-2
+      - websocket-server-3
     ports:
       - "8080:80"
+
+  public-server:
+    build:
+      context: ./backend
+      dockerfile: cmd/public-server/Dockerfile
+    depends_on:
+      - dynamodb
+      - redis
+    environment:
+      AWS_REGION: eu-central-1
+      AWS_ID: local
+      AWS_SECRET: local
+      DYNAMODB_ENDPOINT: http://dynamodb:8000
+      USER_SECRET: change-me-user-secret
+      AUTH_REDIS_URL: redis:6379
+      AUTH_REDIS_PASS: ""
+      CHAT_REDIS_URL: redis:6379
+      CHAT_REDIS_PASS: ""
+      WEB_URL: http://localhost:3000
+    ports:
+      - "8082:82"
+
+  websocket-server-1:
+    build:
+      context: ./backend
+      dockerfile: cmd/ws-server/Dockerfile
+    depends_on:
+      - dynamodb
+      - redis
+    environment:
+      AWS_REGION: eu-central-1
+      AWS_ID: local
+      AWS_SECRET: local
+      DYNAMODB_ENDPOINT: http://dynamodb:8000
+      USER_SECRET: change-me-user-secret
+      AUTH_REDIS_URL: redis:6379
+      AUTH_REDIS_PASS: ""
+      CHAT_REDIS_URL: redis:6379
+      CHAT_REDIS_PASS: ""
+      WEB_URL: http://localhost:3000
+
+  websocket-server-2:
+    build:
+      context: ./backend
+      dockerfile: cmd/ws-server/Dockerfile
+    depends_on:
+      - dynamodb
+      - redis
+    environment:
+      AWS_REGION: eu-central-1
+      AWS_ID: local
+      AWS_SECRET: local
+      DYNAMODB_ENDPOINT: http://dynamodb:8000
+      USER_SECRET: change-me-user-secret
+      AUTH_REDIS_URL: redis:6379
+      AUTH_REDIS_PASS: ""
+      CHAT_REDIS_URL: redis:6379
+      CHAT_REDIS_PASS: ""
+      WEB_URL: http://localhost:3000
+
+  websocket-server-3:
+    build:
+      context: ./backend
+      dockerfile: cmd/ws-server/Dockerfile
+    depends_on:
+      - dynamodb
+      - redis
+    environment:
+      AWS_REGION: eu-central-1
+      AWS_ID: local
+      AWS_SECRET: local
+      DYNAMODB_ENDPOINT: http://dynamodb:8000
+      USER_SECRET: change-me-user-secret
+      AUTH_REDIS_URL: redis:6379
+      AUTH_REDIS_PASS: ""
+      CHAT_REDIS_URL: redis:6379
+      CHAT_REDIS_PASS: ""
+      WEB_URL: http://localhost:3000
 
   frontend:
     build:
@@ -89,6 +171,35 @@ services:
       - client-server
     ports:
       - "3000:3000"
+
+  widget-server:
+    build:
+      context: .
+      dockerfile: widget-server/Dockerfile
+    ports:
+      - "8090:80"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/pingy-chat-widget.js"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    restart: unless-stopped
+
+  dynamodb-viewer:
+    build:
+      context: ./dynamodb-viewer
+    depends_on:
+      dynamodb:
+        condition: service_healthy
+    environment:
+      AWS_REGION: eu-central-1
+      AWS_ACCESS_KEY_ID: local
+      AWS_SECRET_ACCESS_KEY: local
+      AWS_SESSION_TOKEN: ""
+      DYNAMODB_ENDPOINT: http://dynamodb:8000
+      VIEWER_BIND_ADDR: :4100
+    ports:
+      - "4100:4100"
 
 volumes:
   dynamodb-data:

@@ -13,7 +13,16 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <head>
+        <script src="http://localhost:8090/pingy-chat-widget.js"></script>
+      </head>
+      <body>{children}
+        <script>
+          {`PingyChatWidget.init({
+            tenantKey: "pingy_14808939E7C0491998CD24268BDE4607",
+          });`}
+        </script>
+      </body>
     </html>
   );
 }

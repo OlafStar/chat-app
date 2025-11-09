@@ -14,6 +14,7 @@ type TenantEndpoints interface {
 	AddTenantUser(http.ResponseWriter, *http.Request) error
 	AcceptInvite(http.ResponseWriter, *http.Request) error
 	ListPendingInvites(http.ResponseWriter, *http.Request) error
+	TenantAPIKeys(http.ResponseWriter, *http.Request) error
 }
 
 type tenantEndpoints struct {
@@ -47,6 +48,14 @@ func (h *tenantEndpoints) AcceptInvite(w http.ResponseWriter, r *http.Request) e
 func (h *tenantEndpoints) ListPendingInvites(w http.ResponseWriter, r *http.Request) error {
 	return MethodHandler(w, r, map[string]func(http.ResponseWriter, *http.Request) error{
 		http.MethodGet: h.handleListPendingInvites,
+	})
+}
+
+func (h *tenantEndpoints) TenantAPIKeys(w http.ResponseWriter, r *http.Request) error {
+	return MethodHandler(w, r, map[string]func(http.ResponseWriter, *http.Request) error{
+		http.MethodGet:    h.handleListTenantAPIKeys,
+		http.MethodPost:   h.handleCreateTenantAPIKey,
+		http.MethodDelete: h.handleDeleteTenantAPIKey,
 	})
 }
 
@@ -112,6 +121,81 @@ func (h *tenantEndpoints) handleAddTenantUser(w http.ResponseWriter, r *http.Req
 	}
 
 	return WriteJSON(w, http.StatusCreated, resp)
+}
+
+func (h *tenantEndpoints) handleListTenantAPIKeys(w http.ResponseWriter, r *http.Request) error {
+	identity, err := h.service.IdentityFromAuthorizationHeader(r.Header.Get("Authorization"))
+	if err != nil {
+		return h.serviceError(err)
+	}
+
+	keys, err := h.service.ListTenantAPIKeys(r.Context(), identity, identity.TenantID)
+	if err != nil {
+		return h.serviceError(err)
+	}
+
+	return WriteJSON(w, http.StatusOK, dto.TenantAPIKeyListResponse{
+		Keys: toTenantAPIKeyResponse(keys),
+	})
+}
+
+func (h *tenantEndpoints) handleCreateTenantAPIKey(w http.ResponseWriter, r *http.Request) error {
+	identity, err := h.service.IdentityFromAuthorizationHeader(r.Header.Get("Authorization"))
+	if err != nil {
+		return h.serviceError(err)
+	}
+
+	key, err := h.service.CreateTenantAPIKey(r.Context(), identity, identity.TenantID)
+	if err != nil {
+		return h.serviceError(err)
+	}
+
+	return WriteJSON(w, http.StatusCreated, dto.CreateTenantAPIKeyResponse{
+		Key: toTenantAPIKeyDTO(key),
+	})
+}
+
+func (h *tenantEndpoints) handleDeleteTenantAPIKey(w http.ResponseWriter, r *http.Request) error {
+	identity, err := h.service.IdentityFromAuthorizationHeader(r.Header.Get("Authorization"))
+	if err != nil {
+		return h.serviceError(err)
+	}
+
+	var req dto.DeleteTenantAPIKeyRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		return &HTTPError{
+			StatusCode: http.StatusBadRequest,
+			Message:    "Invalid request payload",
+			ErrorLog:   fmt.Errorf("decode delete tenant api key request: %w", err),
+		}
+	}
+
+	if err := h.service.DeleteTenantAPIKey(r.Context(), identity, identity.TenantID, req.KeyID); err != nil {
+		return h.serviceError(err)
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
+func toTenantAPIKeyResponse(keys []tenantservice.TenantAPIKey) []dto.TenantAPIKey {
+	resp := make([]dto.TenantAPIKey, 0, len(keys))
+	for _, key := range keys {
+		resp = append(resp, toTenantAPIKeyDTO(key))
+	}
+	return resp
+}
+
+func toTenantAPIKeyDTO(key tenantservice.TenantAPIKey) dto.TenantAPIKey {
+	createdAt := ""
+	if !key.CreatedAt.IsZero() {
+		createdAt = key.CreatedAt.Format(time.RFC3339)
+	}
+	return dto.TenantAPIKey{
+		KeyID:     key.KeyID,
+		APIKey:    key.APIKey,
+		CreatedAt: createdAt,
+	}
 }
 
 func toInviteResponse(invite *tenantservice.InviteResult) *dto.TenantInviteResponse {
