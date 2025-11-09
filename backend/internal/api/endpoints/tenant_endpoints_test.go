@@ -61,6 +61,26 @@ func (m *tenantTestRepository) UpdateTenantName(ctx context.Context, tenantID, n
 	return tenant, nil
 }
 
+func (m *tenantTestRepository) UpdateTenantSettings(ctx context.Context, tenantID string, settings map[string]interface{}) (model.TenantItem, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	tenant, ok := m.tenants[tenantID]
+	if !ok {
+		return model.TenantItem{}, tenantservice.ErrNotFound
+	}
+	if settings == nil {
+		tenant.Settings = nil
+	} else {
+		copyMap := make(map[string]interface{}, len(settings))
+		for k, v := range settings {
+			copyMap[k] = v
+		}
+		tenant.Settings = copyMap
+	}
+	m.tenants[tenantID] = tenant
+	return tenant, nil
+}
+
 func (m *tenantTestRepository) GetUser(ctx context.Context, tenantID, userID string) (model.UserItem, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -232,6 +252,33 @@ func (m *tenantTestRepository) GetTenantAPIKey(ctx context.Context, tenantID, ke
 		}
 	}
 	return model.TenantAPIKeyItem{}, tenantservice.ErrNotFound
+}
+
+func (m *tenantTestRepository) GetTenantByAPIKey(ctx context.Context, apiKey string) (model.TenantItem, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for tenantID, tenantKeys := range m.keys {
+		for _, key := range tenantKeys {
+			if key.APIKey == apiKey {
+				tenant, ok := m.tenants[tenantID]
+				if !ok {
+					return model.TenantItem{}, tenantservice.ErrNotFound
+				}
+				return tenant, nil
+			}
+		}
+	}
+
+	for _, tenant := range m.tenants {
+		if val, ok := tenant.Settings["apiKey"]; ok {
+			if str, ok := val.(string); ok && str == apiKey {
+				return tenant, nil
+			}
+		}
+	}
+
+	return model.TenantItem{}, tenantservice.ErrNotFound
 }
 
 func tenantFixedTime() time.Time {

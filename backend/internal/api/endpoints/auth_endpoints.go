@@ -225,7 +225,7 @@ func toTenantResponse(tenant model.TenantItem) dto.TenantResponse {
 }
 
 func toTenantResponseWithRemaining(tenant model.TenantItem, remaining *int) dto.TenantResponse {
-	return dto.TenantResponse{
+	resp := dto.TenantResponse{
 		TenantID:       tenant.TenantID,
 		Name:           tenant.Name,
 		Plan:           tenant.Plan,
@@ -233,6 +233,8 @@ func toTenantResponseWithRemaining(tenant model.TenantItem, remaining *int) dto.
 		CreatedAt:      tenant.Created,
 		RemainingSeats: remaining,
 	}
+	resp.Settings = tenantSettingsResponse(tenant)
+	return resp
 }
 
 func toAuthAPIKeys(items []model.TenantAPIKeyItem) []dto.TenantAPIKey {

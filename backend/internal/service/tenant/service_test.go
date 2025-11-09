@@ -54,6 +54,29 @@ func (m *memoryRepository) UpdateTenantName(ctx context.Context, tenantID, name 
 	return tenant, nil
 }
 
+func (m *memoryRepository) UpdateTenantSettings(ctx context.Context, tenantID string, settings map[string]interface{}) (model.TenantItem, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	tenant, ok := m.tenants[tenantID]
+	if !ok {
+		return model.TenantItem{}, ErrNotFound
+	}
+
+	if settings == nil {
+		tenant.Settings = nil
+	} else {
+		copyMap := make(map[string]interface{}, len(settings))
+		for k, v := range settings {
+			copyMap[k] = v
+		}
+		tenant.Settings = copyMap
+	}
+
+	m.tenants[tenantID] = tenant
+	return tenant, nil
+}
+
 func (m *memoryRepository) GetUser(ctx context.Context, tenantID, userID string) (model.UserItem, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -234,6 +257,33 @@ func (m *memoryRepository) GetTenantAPIKey(ctx context.Context, tenantID, keyID 
 	return model.TenantAPIKeyItem{}, ErrNotFound
 }
 
+func (m *memoryRepository) GetTenantByAPIKey(ctx context.Context, apiKey string) (model.TenantItem, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for tenantID, tenantKeys := range m.keys {
+		for _, key := range tenantKeys {
+			if key.APIKey == apiKey {
+				tenant, ok := m.tenants[tenantID]
+				if !ok {
+					return model.TenantItem{}, ErrNotFound
+				}
+				return tenant, nil
+			}
+		}
+	}
+
+	for _, tenant := range m.tenants {
+		if val, ok := tenant.Settings["apiKey"]; ok {
+			if str, ok := val.(string); ok && str == apiKey {
+				return tenant, nil
+			}
+		}
+	}
+
+	return model.TenantItem{}, ErrNotFound
+}
+
 func fixedNow() time.Time {
 	return time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
 }
@@ -326,6 +376,134 @@ func TestUpdateTenantNameRequiresOwner(t *testing.T) {
 	svcErr, ok := err.(*Error)
 	if !ok || svcErr.Code != ErrorCodeForbidden {
 		t.Fatalf("expected forbidden error, got %v", err)
+	}
+}
+
+func TestGetWidgetSettingsDefaults(t *testing.T) {
+	repo := newMemoryRepository()
+	service := newService(repo)
+
+	tenant := model.TenantItem{
+		TenantID: "tenant-1",
+		Name:     "Acme",
+		Plan:     "starter",
+		Seats:    1,
+		Created:  fixedNow().Format(time.RFC3339),
+	}
+	repo.tenants[tenant.TenantID] = tenant
+
+	owner := model.UserItem{
+		PK:        model.TenantScopedPK(tenant.TenantID, "owner-1"),
+		TenantID:  tenant.TenantID,
+		UserID:    "owner-1",
+		Email:     "owner@example.com",
+		Name:      "Owner",
+		Role:      "owner",
+		Status:    "active",
+		CreatedAt: fixedNow().Format(time.RFC3339),
+	}
+	repo.CreateUser(context.Background(), owner)
+
+	settings, err := service.GetWidgetSettings(context.Background(), Identity{
+		UserID:   owner.UserID,
+		TenantID: tenant.TenantID,
+		Email:    owner.Email,
+	}, tenant.TenantID)
+	if err != nil {
+		t.Fatalf("GetWidgetSettings error: %v", err)
+	}
+
+	if settings.BubbleText != DefaultWidgetBubbleText || settings.HeaderText != DefaultWidgetHeaderText || settings.ThemeColor != DefaultWidgetThemeColor {
+		t.Fatalf("expected defaults, got %+v", settings)
+	}
+}
+
+func TestUpdateWidgetSettings(t *testing.T) {
+	repo := newMemoryRepository()
+	service := newService(repo)
+
+	now := fixedNow().Format(time.RFC3339)
+	tenant := model.TenantItem{
+		TenantID: "tenant-1",
+		Name:     "Acme",
+		Plan:     "starter",
+		Seats:    1,
+		Created:  now,
+	}
+	repo.tenants[tenant.TenantID] = tenant
+
+	owner := model.UserItem{
+		PK:        model.TenantScopedPK(tenant.TenantID, "owner-1"),
+		TenantID:  tenant.TenantID,
+		UserID:    "owner-1",
+		Email:     "owner@example.com",
+		Name:      "Owner",
+		Role:      "owner",
+		Status:    "active",
+		CreatedAt: now,
+	}
+	repo.CreateUser(context.Background(), owner)
+
+	settings, err := service.UpdateWidgetSettings(context.Background(), Identity{
+		UserID:   owner.UserID,
+		TenantID: tenant.TenantID,
+		Email:    owner.Email,
+	}, tenant.TenantID, WidgetSettingsInput{
+		BubbleText: "Need help?",
+		HeaderText: "Pingy Support",
+		ThemeColor: "#123ABC",
+	})
+	if err != nil {
+		t.Fatalf("UpdateWidgetSettings error: %v", err)
+	}
+
+	if settings.BubbleText != "Need help?" || settings.HeaderText != "Pingy Support" || settings.ThemeColor != "#123ABC" {
+		t.Fatalf("unexpected settings: %+v", settings)
+	}
+
+	saved := repo.tenants[tenant.TenantID]
+	widget := WidgetSettingsFromTenant(saved)
+	if widget.BubbleText != "Need help?" || widget.HeaderText != "Pingy Support" || widget.ThemeColor != "#123ABC" {
+		t.Fatalf("repository not updated: %+v", widget)
+	}
+}
+
+func TestPublicWidgetSettings(t *testing.T) {
+	repo := newMemoryRepository()
+	service := newService(repo)
+
+	now := fixedNow().Format(time.RFC3339)
+	tenant := model.TenantItem{
+		TenantID: "tenant-1",
+		Name:     "Acme",
+		Plan:     "starter",
+		Seats:    1,
+		Created:  now,
+		Settings: map[string]interface{}{
+			"widget": map[string]interface{}{
+				"bubbleText": "Chat with Acme",
+				"headerText": "Acme Support",
+				"themeColor": "#ABCDEF",
+			},
+		},
+	}
+	repo.tenants[tenant.TenantID] = tenant
+
+	apiKey := model.TenantAPIKeyItem{
+		TenantID:  tenant.TenantID,
+		KeyID:     "key-1",
+		APIKey:    "pingy_testkey",
+		CreatedAt: now,
+	}
+	repo.CreateTenantAPIKey(context.Background(), apiKey)
+
+	settings, err := service.PublicWidgetSettings(context.Background(), apiKey.APIKey)
+	if err != nil {
+		t.Fatalf("PublicWidgetSettings error: %v", err)
+	}
+
+	if settings.BubbleText != "Chat with Acme" || settings.HeaderText != "Acme Support" || settings.ThemeColor != "#ABCDEF" {
+		t.Fatalf("unexpected settings: %+v", settings)
 	}
 }
 

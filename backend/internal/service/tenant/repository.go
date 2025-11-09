@@ -17,6 +17,8 @@ var ErrNotFound = errors.New("tenant repository: not found")
 type Repository interface {
 	GetTenant(ctx context.Context, tenantID string) (model.TenantItem, error)
 	UpdateTenantName(ctx context.Context, tenantID, name string) (model.TenantItem, error)
+	UpdateTenantSettings(ctx context.Context, tenantID string, settings map[string]interface{}) (model.TenantItem, error)
+	GetTenantByAPIKey(ctx context.Context, apiKey string) (model.TenantItem, error)
 	GetUser(ctx context.Context, tenantID, userID string) (model.UserItem, error)
 	ListUsersByTenant(ctx context.Context, tenantID string) ([]model.UserItem, error)
 	ListUsersByEmail(ctx context.Context, email string) ([]model.UserItem, error)
@@ -82,6 +84,91 @@ func (r *DynamoRepository) UpdateTenantName(ctx context.Context, tenantID, name 
 		return model.TenantItem{}, err
 	}
 	return updated, nil
+}
+
+func (r *DynamoRepository) UpdateTenantSettings(ctx context.Context, tenantID string, settings map[string]interface{}) (model.TenantItem, error) {
+	var updated model.TenantItem
+
+	exprAttrNames := map[string]string{
+		"#settings": "settings",
+	}
+	exprAttrValues := map[string]types.AttributeValue{}
+	updateExpr := "REMOVE #settings"
+
+	if len(settings) > 0 {
+		marshaled, err := attributevalue.Marshal(settings)
+		if err != nil {
+			return model.TenantItem{}, err
+		}
+		updateExpr = "SET #settings = :settings"
+		exprAttrValues[":settings"] = marshaled
+	}
+
+	err := r.db.Client.UpdateItem(
+		ctx,
+		model.TenantsTable,
+		map[string]types.AttributeValue{
+			"tenantId": &types.AttributeValueMemberS{Value: tenantID},
+		},
+		updateExpr,
+		exprAttrValues,
+		exprAttrNames,
+		&updated,
+	)
+	if err != nil {
+		return model.TenantItem{}, err
+	}
+	return updated, nil
+}
+
+func (r *DynamoRepository) GetTenantByAPIKey(ctx context.Context, apiKey string) (model.TenantItem, error) {
+	items, err := r.db.Client.QueryItems(
+		ctx,
+		model.TenantAPIKeysTable,
+		aws.String("byApiKey"),
+		"apiKey = :apiKey",
+		map[string]types.AttributeValue{
+			":apiKey": &types.AttributeValueMemberS{Value: apiKey},
+		},
+		nil,
+		nil,
+	)
+	if err != nil && !isIndexNotFound(err) {
+		return model.TenantItem{}, err
+	}
+
+	if len(items) > 0 {
+		var key model.TenantAPIKeyItem
+		if err := attributevalue.UnmarshalMap(items[0], &key); err != nil {
+			return model.TenantItem{}, err
+		}
+		return r.GetTenant(ctx, key.TenantID)
+	}
+
+	legacyItems, err := r.db.Client.ScanItems(
+		ctx,
+		model.TenantsTable,
+		"#apiKey = :apiKey",
+		map[string]types.AttributeValue{
+			":apiKey": &types.AttributeValueMemberS{Value: apiKey},
+		},
+		map[string]string{
+			"#apiKey": "apiKey",
+		},
+	)
+	if err != nil {
+		return model.TenantItem{}, err
+	}
+	if len(legacyItems) == 0 {
+		return model.TenantItem{}, ErrNotFound
+	}
+
+	var tenant model.TenantItem
+	if err := attributevalue.UnmarshalMap(legacyItems[0], &tenant); err != nil {
+		return model.TenantItem{}, err
+	}
+
+	return tenant, nil
 }
 
 func (r *DynamoRepository) ListTenantAPIKeys(ctx context.Context, tenantID string) ([]model.TenantAPIKeyItem, error) {
@@ -365,4 +452,8 @@ func (r *DynamoRepository) DeleteInvite(ctx context.Context, token string) error
 
 func isNotFoundError(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "item not found")
+}
+
+func isIndexNotFound(err error) bool {
+	return err != nil && strings.Contains(strings.ToLower(err.Error()), "index does not exist")
 }

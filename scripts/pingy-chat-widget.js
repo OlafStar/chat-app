@@ -343,6 +343,64 @@
     try { return JSON.parse(raw); } catch (_err) { return null; }
   }
 
+  function hasNonEmptyText(value) {
+    return typeof value === "string" && value.trim() !== "";
+  }
+
+  function fetchWidgetSettings(apiBase, tenantKey) {
+    if (!apiBase || !hasNonEmptyText(tenantKey)) {
+      return Promise.resolve(null);
+    }
+    const endpoint = joinUrl(apiBase, "/api/public/v1/widget");
+    const url = `${endpoint}?tenantKey=${encodeURIComponent(tenantKey)}`;
+    return fetch(url, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Tenant-Key": tenantKey,
+      },
+    })
+      .then((response) => checkStatus(response))
+      .then((response) => response.json())
+      .then((payload) => {
+        if (payload && typeof payload.widget === "object") {
+          return {
+            bubbleText: typeof payload.widget.bubbleText === "string" ? payload.widget.bubbleText : undefined,
+            headerText: typeof payload.widget.headerText === "string" ? payload.widget.headerText : undefined,
+            themeColor: typeof payload.widget.themeColor === "string" ? payload.widget.themeColor : undefined,
+          };
+        }
+        return null;
+      })
+      .catch((error) => {
+        console.warn("PingyChatWidget: failed to fetch widget settings", error);
+        return null;
+      });
+  }
+
+  function applyRemoteWidgetConfig(options, remoteWidget) {
+    if (!remoteWidget) {
+      return { ...options };
+    }
+    const merged = { ...options };
+    if (!hasNonEmptyText(options.bubbleText) && hasNonEmptyText(remoteWidget.bubbleText)) {
+      merged.bubbleText = remoteWidget.bubbleText;
+    }
+    if (!hasNonEmptyText(options.headerText) && hasNonEmptyText(remoteWidget.headerText)) {
+      merged.headerText = remoteWidget.headerText;
+    }
+    if (!hasNonEmptyText(options.themeColor) && hasNonEmptyText(remoteWidget.themeColor)) {
+      merged.themeColor = remoteWidget.themeColor;
+    }
+    return merged;
+  }
+
+  function prepareWidgetOptions(options) {
+    const base = { ...options };
+    const apiBase = resolveApiBase();
+    return fetchWidgetSettings(apiBase, base.tenantKey).then((remoteWidget) => applyRemoteWidgetConfig(base, remoteWidget));
+  }
+
   function createWidget(options) {
     const config = {
       ...defaultConfig,
@@ -952,15 +1010,52 @@
       console.warn("PingyChatWidget has already been initialised. Ignoring subsequent init call.");
       return window.PingyChatWidget;
     }
-    const controls = createWidget(options || {});
+    const provided = options ? { ...options } : {};
+    const tenantKey = hasNonEmptyText(provided.tenantKey) ? provided.tenantKey.trim() : "";
+    if (!tenantKey) {
+      throw new Error("PingyChatWidget: tenantKey is required");
+    }
+    provided.tenantKey = tenantKey;
     initialized = true;
-    window.PingyChatWidget.__controls = controls;
+
+    const readyPromise = prepareWidgetOptions(provided)
+      .then((preparedOptions) => createWidget(preparedOptions))
+      .catch((error) => {
+        console.warn("PingyChatWidget: defaulting to local widget settings", error);
+        return createWidget(provided);
+      })
+      .then((controls) => {
+        window.PingyChatWidget.__controls = controls;
+        return controls;
+      })
+      .catch((error) => {
+        console.error("PingyChatWidget failed to initialise", error);
+        throw error;
+      });
+
+    window.PingyChatWidget.__ready = readyPromise;
     return window.PingyChatWidget;
   }
 
   window.PingyChatWidget = {
     init,
-    open: function () { if (this.__controls) this.__controls.open(); },
-    close: function () { if (this.__controls) this.__controls.close(); },
+    open: function () {
+      if (this.__controls) {
+        this.__controls.open();
+        return;
+      }
+      if (this.__ready && typeof this.__ready.then === "function") {
+        this.__ready.then((controls) => controls && controls.open()).catch(() => {});
+      }
+    },
+    close: function () {
+      if (this.__controls) {
+        this.__controls.close();
+        return;
+      }
+      if (this.__ready && typeof this.__ready.then === "function") {
+        this.__ready.then((controls) => controls && controls.close()).catch(() => {});
+      }
+    },
   };
 })(window, document);

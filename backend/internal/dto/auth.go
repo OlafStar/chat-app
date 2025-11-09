@@ -26,7 +26,8 @@ type TenantResponse struct {
 	// RemainingSeats surfaces the number of additional active users that can be
 	// provisioned within the tenant (owner included in the seat calculation).
 	// It is omitted when not computed by the backing service.
-	RemainingSeats *int `json:"remainingSeats,omitempty"`
+	RemainingSeats *int                    `json:"remainingSeats,omitempty"`
+	Settings       *TenantSettingsResponse `json:"settings,omitempty"`
 }
 
 type UserResponse struct {

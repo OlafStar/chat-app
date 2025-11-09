@@ -279,6 +279,10 @@ func (h *tenantEndpoints) handleListPendingInvites(w http.ResponseWriter, r *htt
 }
 
 func (h *tenantEndpoints) serviceError(err error) error {
+	return mapTenantServiceError(err)
+}
+
+func mapTenantServiceError(err error) error {
 	if err == nil {
 		return nil
 	}

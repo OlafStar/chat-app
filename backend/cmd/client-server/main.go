@@ -24,6 +24,7 @@ func main() {
 		router.UtilsRoutes("/api/client/v1"),
 		router.AuthRoutes("/api/client/v1"),
 		router.TenantRoutes("/api/client/v1"),
+		router.WidgetRoutes("/api/client/v1"),
 		router.ConversationTenantRoutes("/api/client/v1"),
 	)
 

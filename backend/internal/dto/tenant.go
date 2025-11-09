@@ -4,6 +4,26 @@ type UpdateTenantRequest struct {
 	Name string `json:"name"`
 }
 
+type TenantSettingsResponse struct {
+	Widget WidgetSettingsResponse `json:"widget"`
+}
+
+type WidgetSettingsResponse struct {
+	BubbleText string `json:"bubbleText"`
+	HeaderText string `json:"headerText"`
+	ThemeColor string `json:"themeColor"`
+}
+
+type UpdateWidgetSettingsRequest struct {
+	BubbleText string `json:"bubbleText"`
+	HeaderText string `json:"headerText"`
+	ThemeColor string `json:"themeColor"`
+}
+
+type WidgetSettingsResultResponse struct {
+	Widget WidgetSettingsResponse `json:"widget"`
+}
+
 type AddTenantUserRequest struct {
 	Name     string `json:"name"`
 	Email    string `json:"email"`

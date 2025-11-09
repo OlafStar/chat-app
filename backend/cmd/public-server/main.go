@@ -22,6 +22,7 @@ func main() {
 		nil,
 		router.UtilsRoutes("/api/public/v1"),
 		router.ConversationPublicRoutes("/api/public/v1"),
+		router.WidgetPublicRoutes("/api/public/v1"),
 	)
 
 	server.Run()
