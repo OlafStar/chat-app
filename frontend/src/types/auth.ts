@@ -47,3 +47,16 @@ export interface AuthResponse {
   tenant: TenantResponse
   tenants?: TenantMembership[]
 }
+
+export interface AuthMeResponse {
+  user: UserResponse
+  tenant: TenantResponse & {
+    settings: {
+      widget: {
+        bubbleText:string;
+        headerText: string;
+        themeColor: string
+      }
+    }
+  }
+}
