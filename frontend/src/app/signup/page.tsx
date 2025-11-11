@@ -1,29 +1,32 @@
-import type { Metadata } from "next";
-import Link from "next/link";
+import { GalleryVerticalEnd } from "lucide-react"
 
-import { AuthShell } from "~/components/auth/auth-shell";
-import { SignupForm } from "~/components/auth/signup-form";
-
-export const metadata: Metadata = {
-  title: "Pingy Console | Create workspace",
-  description: "Launch a Pingy tenant for your support organization.",
-};
+import { SignupForm } from "~/components/signup-form"
 
 export default function SignupPage() {
   return (
-    <AuthShell
-      title="Create your Pingy workspace"
-      subtitle="Stand up a secure tenant for your agents and automate the boring parts of support."
-      footer={
-        <>
-          Already have a login?{" "}
-          <Link className="font-medium text-primary underline" href="/login">
-            Go to sign in
-          </Link>
-        </>
-      }
-    >
-      <SignupForm />
-    </AuthShell>
-  );
+    <div className="grid min-h-svh lg:grid-cols-2">
+      <div className="flex flex-col gap-4 p-6 md:p-10">
+        <div className="flex justify-center gap-2 md:justify-start">
+          <a href="#" className="flex items-center gap-2 font-medium">
+            <div className="bg-primary text-primary-foreground flex size-6 items-center justify-center rounded-md">
+              <GalleryVerticalEnd className="size-4" />
+            </div>
+            Acme Inc.
+          </a>
+        </div>
+        <div className="flex flex-1 items-center justify-center">
+          <div className="w-full max-w-xs">
+            <SignupForm />
+          </div>
+        </div>
+      </div>
+      <div className="bg-muted relative hidden lg:block">
+        <img
+          src="/placeholder.svg"
+          alt="Image"
+          className="absolute inset-0 h-full w-full object-cover dark:brightness-[0.2] dark:grayscale"
+        />
+      </div>
+    </div>
+  )
 }
