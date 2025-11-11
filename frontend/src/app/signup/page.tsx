@@ -1,6 +1,6 @@
 import { GalleryVerticalEnd } from "lucide-react"
 
-import { SignupForm } from "~/components/signup-form"
+import { SignupForm } from "~/components/forms/signup-form"
 
 export default function SignupPage() {
   return (
@@ -11,7 +11,7 @@ export default function SignupPage() {
             <div className="bg-primary text-primary-foreground flex size-6 items-center justify-center rounded-md">
               <GalleryVerticalEnd className="size-4" />
             </div>
-            Acme Inc.
+            Pingy
           </a>
         </div>
         <div className="flex flex-1 items-center justify-center">

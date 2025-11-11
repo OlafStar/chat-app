@@ -169,6 +169,8 @@ services:
       dockerfile: Dockerfile
     depends_on:
       - client-server
+    environment:
+      NEXT_PUBLIC_CLIENT_API_BASE_PATH: http://localhost:8080/api/client/v1
     ports:
       - "3000:3000"
 
