@@ -172,6 +172,7 @@ func setupAuthHandler(t *testing.T, svc *authsvc.Service) (http.Handler, func())
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/auth/register", server.MakeHTTPHandleFunc(authEndpoints.Register))
 	mux.HandleFunc("/api/auth/login", server.MakeHTTPHandleFunc(authEndpoints.Login))
+	mux.HandleFunc("/api/auth/refresh", server.MakeHTTPHandleFunc(authEndpoints.RefreshToken))
 	mux.HandleFunc("/api/auth/me", server.MakeHTTPHandleFunc(authEndpoints.Me, middleware.ValidateUserJWT))
 	mux.HandleFunc("/api/auth/switch", server.MakeHTTPHandleFunc(authEndpoints.Switch, middleware.ValidateUserJWT))
 
@@ -327,6 +328,36 @@ func TestAuthEndpointsEndToEnd(t *testing.T) {
 
 	if meResp.Tenant.TenantID != registerResp.Tenant.TenantID {
 		t.Fatalf("expected tenant ID %s, got %s", registerResp.Tenant.TenantID, meResp.Tenant.TenantID)
+	}
+}
+
+func TestAuthRefreshToken(t *testing.T) {
+	setupTestJWT(t)
+	authsvc.SetRefreshTokenValidator(func(token string, role internaljwt.Role) (string, error) {
+		return token + "-refreshed", nil
+	})
+	t.Cleanup(func() {
+		authsvc.SetRefreshTokenValidator(nil)
+	})
+
+	repo := newTestRepository()
+	service := authsvc.NewWithRepository(repo, fixedTime)
+
+	handler, cleanup := setupAuthHandler(t, service)
+	defer cleanup()
+
+	payload := map[string]string{
+		"refreshToken": "sample-refresh-token",
+	}
+
+	resp := doJSONRequest[dto.RefreshTokenResponse](t, handler, http.MethodPost, "/api/auth/refresh", payload, nil, http.StatusOK)
+
+	if resp.AccessToken != "sample-refresh-token-refreshed" {
+		t.Fatalf("expected refreshed access token, got %s", resp.AccessToken)
+	}
+
+	if resp.RefreshToken != "sample-refresh-token" {
+		t.Fatalf("expected refresh token echoed back, got %s", resp.RefreshToken)
 	}
 }
 

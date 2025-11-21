@@ -15,6 +15,7 @@ type AuthEndpoints interface {
 	Login(http.ResponseWriter, *http.Request) error
 	Me(http.ResponseWriter, *http.Request) error
 	Switch(http.ResponseWriter, *http.Request) error
+	RefreshToken(http.ResponseWriter, *http.Request) error
 }
 
 type authEndpoints struct {
@@ -48,6 +49,12 @@ func (h *authEndpoints) Me(w http.ResponseWriter, r *http.Request) error {
 func (h *authEndpoints) Switch(w http.ResponseWriter, r *http.Request) error {
 	return MethodHandler(w, r, map[string]func(http.ResponseWriter, *http.Request) error{
 		http.MethodPost: h.handleSwitch,
+	})
+}
+
+func (h *authEndpoints) RefreshToken(w http.ResponseWriter, r *http.Request) error {
+	return MethodHandler(w, r, map[string]func(http.ResponseWriter, *http.Request) error{
+		http.MethodPost: h.handleRefreshToken,
 	})
 }
 
@@ -94,6 +101,27 @@ func (h *authEndpoints) handleLogin(w http.ResponseWriter, r *http.Request) erro
 	}
 
 	return WriteJSON(w, http.StatusOK, toAuthResponse(result))
+}
+
+func (h *authEndpoints) handleRefreshToken(w http.ResponseWriter, r *http.Request) error {
+	var req dto.RefreshTokenRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		return &HTTPError{
+			StatusCode: http.StatusBadRequest,
+			Message:    "Invalid request payload",
+			ErrorLog:   fmt.Errorf("decode refresh token request: %w", err),
+		}
+	}
+
+	result, err := h.service.RefreshToken(r.Context(), req.RefreshToken)
+	if err != nil {
+		return h.serviceError(err)
+	}
+
+	return WriteJSON(w, http.StatusOK, dto.RefreshTokenResponse{
+		AccessToken:  result.AccessToken,
+		RefreshToken: result.RefreshToken,
+	})
 }
 
 func (h *authEndpoints) handleMe(w http.ResponseWriter, r *http.Request) error {

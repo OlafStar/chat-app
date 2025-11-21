@@ -1,5 +1,3 @@
-import type { AuthResponse } from "~/types/auth"
-
 const ACCESS_TOKEN_KEY = "pingy:access-token"
 const REFRESH_TOKEN_KEY = "pingy:refresh-token"
 
@@ -35,7 +33,15 @@ export const getAccessToken = () => {
   return window.localStorage.getItem(ACCESS_TOKEN_KEY)
 }
 
-export const persistAuthTokens = (response: AuthResponse) => {
+export const getRefreshToken = () => {
+  if (typeof window === "undefined") {
+    return null
+  }
+
+  return window.localStorage.getItem(REFRESH_TOKEN_KEY)
+}
+
+export const persistAuthTokens = (response: { accessToken: string; refreshToken?: string }) => {
   if (typeof window === "undefined") {
     return
   }

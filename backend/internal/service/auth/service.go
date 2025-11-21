@@ -33,6 +33,16 @@ func SetTokenIssuer(issuer func(internaljwt.User, internaljwt.Role, int64) (inte
 	createTokenWithRefresh = issuer
 }
 
+var refreshTokenValidator = internaljwt.RefreshToken
+
+func SetRefreshTokenValidator(validator func(string, internaljwt.Role) (string, error)) {
+	if validator == nil {
+		refreshTokenValidator = internaljwt.RefreshToken
+		return
+	}
+	refreshTokenValidator = validator
+}
+
 func New(db *database.Database) *Service {
 	return &Service{
 		repo: NewDynamoRepository(db),
@@ -250,6 +260,23 @@ func (s *Service) SwitchTenant(ctx context.Context, identity Identity, tenantID 
 		Tenant:      defaultMatch.Tenant,
 		Tokens:      tokens,
 		Memberships: memberships,
+	}, nil
+}
+
+func (s *Service) RefreshToken(ctx context.Context, refreshToken string) (internaljwt.TokenResponse, error) {
+	token := strings.TrimSpace(refreshToken)
+	if token == "" {
+		return internaljwt.TokenResponse{}, newError(ErrorCodeValidation, "refresh token is required", nil)
+	}
+
+	accessToken, err := refreshTokenValidator(token, internaljwt.RoleUser)
+	if err != nil {
+		return internaljwt.TokenResponse{}, newError(ErrorCodeUnauthorized, "invalid refresh token", err)
+	}
+
+	return internaljwt.TokenResponse{
+		AccessToken:  accessToken,
+		RefreshToken: token,
 	}, nil
 }
 

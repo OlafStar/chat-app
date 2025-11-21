@@ -64,3 +64,12 @@ type TenantMembership struct {
 	Status    string `json:"status"`
 	IsDefault bool   `json:"isDefault"`
 }
+
+type RefreshTokenRequest struct {
+	RefreshToken string `json:"refreshToken"`
+}
+
+type RefreshTokenResponse struct {
+	AccessToken  string `json:"accessToken"`
+	RefreshToken string `json:"refreshToken,omitempty"`
+}

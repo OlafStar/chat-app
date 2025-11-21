@@ -12,6 +12,7 @@ func AuthRoutes(prefix string) api.RouteRegistrar {
 		authEndpoints := endpoints.NewAuthEndpoints(s.Database())
 		mux.HandleFunc(prefix+"/auth/register", s.MakeHTTPHandleFunc(authEndpoints.Register))
 		mux.HandleFunc(prefix+"/auth/login", s.MakeHTTPHandleFunc(authEndpoints.Login))
+		mux.HandleFunc(prefix+"/auth/refresh", s.MakeHTTPHandleFunc(authEndpoints.RefreshToken))
 		mux.HandleFunc(prefix+"/auth/me", s.MakeHTTPHandleFunc(authEndpoints.Me, middleware.ValidateUserJWT))
 		mux.HandleFunc(prefix+"/auth/switch", s.MakeHTTPHandleFunc(authEndpoints.Switch, middleware.ValidateUserJWT))
 	}
