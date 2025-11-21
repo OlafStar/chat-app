@@ -1,3 +1,5 @@
+import type { TenantAPIKey, TenantSettings } from "./tenant"
+
 export interface RegisterRequest {
   tenantName: string
   name: string
@@ -26,6 +28,8 @@ export interface TenantResponse {
   plan: string
   seats: number
   createdAt: string
+  remainingSeats?: number
+  settings?: TenantSettings
 }
 
 export interface UserResponse {
@@ -54,18 +58,11 @@ export interface AuthResponse {
   refreshToken?: string
   user: UserResponse
   tenant: TenantResponse
+  apiKeys?: TenantAPIKey[]
   tenants?: TenantMembership[]
 }
 
 export interface AuthMeResponse {
   user: UserResponse
-  tenant: TenantResponse & {
-    settings: {
-      widget: {
-        bubbleText:string;
-        headerText: string;
-        themeColor: string
-      }
-    }
-  }
+  tenant: TenantResponse
 }
