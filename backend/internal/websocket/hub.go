@@ -28,6 +28,7 @@ func (h *Hub) Run() {
 				continue
 			}
 			room.Clients[client.ID] = client
+			incConnections()
 
 		case client := <-h.Unregister:
 			room, ok := h.Rooms[client.RoomID]
@@ -39,6 +40,7 @@ func (h *Hub) Run() {
 			if _, ok := room.Clients[client.ID]; ok {
 				delete(room.Clients, client.ID)
 				close(client.Message)
+				decConnections()
 			}
 
 		case message := <-h.Broadcast:
@@ -48,13 +50,19 @@ func (h *Hub) Run() {
 				// Just log a message and ignore the broadcast
 				continue
 			}
+			delivered := 0
 			for _, client := range room.Clients {
 				select {
 				case client.Message <- message:
+					delivered++
 				default:
 					close(client.Message)
 					delete(room.Clients, client.ID)
+					decConnections()
 				}
+			}
+			if delivered > 0 {
+				addDelivered(delivered)
 			}
 		}
 	}

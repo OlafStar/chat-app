@@ -80,6 +80,7 @@ func (h *Handler) CreateRoom(id string) {
 	}
 
 	h.hub.Rooms[id] = room
+	setRooms(len(h.hub.Rooms))
 
 	// Ensure Redis subscription for the room only once
 	go h.subscribeToRoomChannel(id)

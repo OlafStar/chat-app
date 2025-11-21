@@ -1,0 +1,35 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["prometheus:9090"]
+
+  - job_name: client-server
+    static_configs:
+      - targets: ["client-server:81"]
+
+  - job_name: public-server
+    static_configs:
+      - targets: ["public-server:82"]
+
+  - job_name: websocket-servers
+    static_configs:
+      - targets:
+          - "websocket-server-1:83"
+          - "websocket-server-2:83"
+          - "websocket-server-3:83"
+
+  - job_name: redis
+    static_configs:
+      - targets: ["redis-exporter:9121"]
+
+  - job_name: cadvisor
+    static_configs:
+      - targets: ["cadvisor:8080"]
+
+  - job_name: node-exporter
+    static_configs:
+      - targets: ["node-exporter:9100"]
